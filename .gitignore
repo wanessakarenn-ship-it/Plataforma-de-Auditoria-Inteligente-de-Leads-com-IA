@@ -1,0 +1,48 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*service-account*.json
+*credentials*.json
+application_default_credentials.json
+*.p8
+.secrets/
+credentials/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+*.tsbuildinfo
+
+# Local data and databases
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+tmp/
+temp/
+*.csv
+*.xlsx
+*.xlsm
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+coverage/
+npm-debug.log*
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
