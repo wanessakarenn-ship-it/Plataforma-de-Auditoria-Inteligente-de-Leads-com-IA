@@ -65,6 +65,82 @@ npm.cmd run typecheck
 npm.cmd run build
 ```
 
+## Continuar em outro computador
+
+### Requisitos
+
+- Git para Windows.
+- Python 3.12–3.14 e `uv`.
+- Node.js 20.9 ou superior (inclui npm).
+- Google Cloud CLI somente para autenticar o desenvolvimento que usa Firebase Admin/Google Cloud.
+
+Instale esses componentes por fontes oficiais ou pelo gerenciador de pacotes aprovado pela sua organização. Docker não é necessário para o banco SQLite local.
+
+### Clonar e selecionar a Sprint 02
+
+Depois que `feat/sprint-02-auditoria-ia` estiver publicada:
+
+```powershell
+git clone https://github.com/wanessakarenn-ship-it/Plataforma-de-Auditoria-Inteligente-de-Leads-com-IA.git
+cd Plataforma-de-Auditoria-Inteligente-de-Leads-com-IA
+git fetch origin feat/sprint-02-auditoria-ia
+git switch --track origin/feat/sprint-02-auditoria-ia
+```
+
+### Configurar e executar
+
+Na raiz do repositório, copie o exemplo de configuração e instale as dependências Python:
+
+```powershell
+Copy-Item .env.example .env
+uv sync
+uv run alembic upgrade head
+uv run uvicorn backend.app.main:app --reload
+```
+
+O exemplo configura SQLite em `./bc_lead_intelligence.db`; o arquivo do banco é local e não deve ser versionado. Para PostgreSQL, configure `DATABASE_URL` no `.env` local e aplique as mesmas migrações com `uv run alembic upgrade head`.
+
+Em outro terminal PowerShell:
+
+```powershell
+cd Plataforma-de-Auditoria-Inteligente-de-Leads-com-IA\frontend
+Copy-Item .env.example .env.local
+npm.cmd ci
+npm.cmd run dev
+```
+
+Preencha em `frontend/.env.local` somente os valores públicos da aplicação Web Firebase aprovada (`API_KEY`, `AUTH_DOMAIN`, `PROJECT_ID` e `APP_ID`). Não coloque tokens, chaves privadas ou credenciais de conta de serviço nesses arquivos. Acesse `http://localhost:3000`; a API estará em `http://localhost:8000`.
+
+### Autenticar Google Cloud para desenvolvimento
+
+Instale e abra um terminal novo após instalar o Google Cloud CLI. Para o projeto existente, autentique-se interativamente com a conta autorizada:
+
+```powershell
+gcloud auth login
+gcloud config set project prime-amulet-439718-e3
+gcloud auth application-default login
+gcloud config get-value project
+```
+
+Conclua os fluxos de navegador diretamente no computador e nunca compartilhe ou versione os arquivos de credenciais. A autenticação não habilita APIs nem cria recursos. Para desenvolvimento local, o Firebase Admin SDK usa Application Default Credentials; em produção deverá ser usada uma identidade de runtime apropriada, não uma chave de usuário ou arquivo de conta de serviço.
+
+### Testes e verificações
+
+Na raiz:
+
+```powershell
+uv run pytest
+uv run alembic upgrade head
+```
+
+No frontend:
+
+```powershell
+cd frontend
+npm.cmd run typecheck
+npm.cmd run build
+```
+
 ## Estrutura
 
 - `backend/app`: API FastAPI, modelos, importador, classificação e arquitetura Vertex AI.
