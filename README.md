@@ -1,6 +1,6 @@
 # BC Lead Intelligence
 
-Aplicação local-first para importar, classificar e auditar leads. Nesta Sprint 01 não há envio de mensagens, integração mutável com Salesforce, processamento real com Gemini nem provisionamento de recursos Google Cloud.
+Aplicação local-first para importar, classificar e auditar leads. A Sprint 02 inclui auditoria simulada baseada em citações de mensagens autorizadas, histórico independente de conversas e preparo opt-in do Vertex AI. Não há envio de mensagens, integração mutável com Salesforce nem provisionamento de recursos Google Cloud.
 
 ## Requisitos
 
@@ -23,11 +23,12 @@ Em outro terminal:
 
 ```powershell
 cd frontend
+Copy-Item .env.example .env.local
 npm.cmd install
 npm.cmd run dev
 ```
 
-Abra `http://localhost:3000`. A API está em `http://localhost:8000`; documentação OpenAPI em `/docs`.
+Preencha em `frontend/.env.local` os valores públicos da aplicação Web Firebase vinculada ao projeto confirmado; habilite o provedor de login escolhido no Firebase Authentication e reinicie o frontend. O acesso exige os custom claims `role` e `tenant_id` emitidos pelo backend operacional confiável. Abra `http://localhost:3000`. A API está em `http://localhost:8000`; documentação OpenAPI em `/docs`.
 
 Para PostgreSQL, defina `DATABASE_URL` no `.env` com uma URL `postgresql+psycopg://...`. Mantenha senhas apenas no `.env` local, que é ignorado pelo Git. Execute `uv run alembic upgrade head` depois de configurar a URL.
 
@@ -42,9 +43,17 @@ Não há planilha Salesforce original neste repositório. Os testes usam apenas 
 - Uma fila de auditoria separada de uma fila de contato em rascunho.
 - O estado padrão de consentimento é desconhecido; contato exige permissão e aprovação verificáveis.
 - Não existe endpoint nem código de envio de WhatsApp ou de outras mensagens.
-- Vertex AI está preparado, mas desativado; nenhum dado de cliente é enviado a modelos.
+- A simulação usa correspondência literal e nunca chama serviços externos. Vertex AI real permanece bloqueado por padrão e exige flags explícitas, tarifas do modelo e teto de custo.
+- Auditorias conclusivas exigem citações que correspondam exatamente a mensagens autorizadas; resultados precisam de revisão humana.
+- A API valida Firebase Authentication ID tokens e exige `role` (`admin`, `auditor` ou `gestor`) e `tenant_id`; consulte [docs/security.md](./docs/security.md) para a matriz de endpoints.
+- `FIREBASE_PROJECT_ID` e o projeto Firebase Web usam o projeto confirmado `prime-amulet-439718-e3`; os valores restantes da aplicação Web devem vir da configuração oficial do Firebase, nunca de credenciais privadas.
+- Antes de iniciar a API, configure Application Default Credentials para o Firebase Admin SDK. Não copie tokens nem credenciais para `.env`; use o mecanismo ADC local aprovado ou a identidade de runtime em produção.
+- O frontend autentica com Firebase Authentication (e-mail/senha ou Google) e envia ID tokens bearer. Os componentes de navegação são limitados pelo perfil; autorização e tenant continuam sendo aplicados pela API.
+- Mensagens não autorizadas, excluídas ou expiradas não entram no contexto. A retenção local padrão é 90 dias (`MESSAGE_RETENTION_DAYS`, limitado a 1–365), com limpeza automática no início e diariamente.
+- O arquivo Salesforce real não está no repositório. A cobertura usa fixtures sintéticas; valide os mapeamentos em uma cópia sanitizada antes do uso operacional.
 - Nenhum bucket, banco Cloud SQL, serviço, API ou outro recurso GCP é criado ou habilitado por esta aplicação.
 - SQLite é adequado somente para desenvolvimento local; use PostgreSQL gerenciado/operado com backups, rede privada, segredo externo e controle de acesso antes de produção.
+- A API e o frontend têm autenticação, autorização por role e escopo por tenant. Antes de expor ou implantar, configure os provedores e valores oficiais do Firebase Web, ADC/IAM de runtime, origens CORS, limites compartilhados e migração revisada dos dados legados.
 
 ## Verificações
 
@@ -64,4 +73,4 @@ npm.cmd run build
 - `tests`: testes com planilhas e dados fictícios.
 - `docs`: decisões, classificação e integrações futuras.
 
-Consulte [docs/architecture.md](docs/architecture.md) para detalhes de dados, classificação e integração futura.
+Consulte [docs/architecture.md](docs/architecture.md) para detalhes de dados, retenção, auditoria e integração futura.

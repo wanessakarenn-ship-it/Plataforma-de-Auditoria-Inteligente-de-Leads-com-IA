@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from backend.app.auth import Principal, get_current_principal
 from backend.app.db import get_db
 from backend.app.main import app
 from backend.app.models import Base
@@ -24,6 +25,12 @@ def db_session_factory():
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_principal] = lambda: Principal(
+        uid="synthetic-test-user",
+        role="auditor",
+        tenant_id="test-tenant",
+        additional_roles=frozenset({"admin", "gestor"}),
+    )
     yield TestingSession
     app.dependency_overrides.clear()
     Base.metadata.drop_all(engine)

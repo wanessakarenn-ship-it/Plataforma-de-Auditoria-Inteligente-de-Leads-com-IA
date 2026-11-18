@@ -6,6 +6,8 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
     "alembic>=1.15,<2",
     "fastapi>=0.115,<1",
+    "firebase-admin>=6.5,<8",
+    "google-genai>=1.30,<2",
     "openpyxl>=3.1,<4",
     "psycopg[binary]>=3.2,<4",
     "pydantic-settings>=2.7,<3",
