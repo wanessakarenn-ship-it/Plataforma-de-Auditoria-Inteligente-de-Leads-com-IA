@@ -53,7 +53,7 @@ def _record_log(
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "bc-lead-intelligence-api"}
+    return {"status": "ok", "service": "lead-intelligence-ai-api"}
 
 
 @router.post("/imports/preview", response_model=ImportPreviewResponse)
@@ -469,7 +469,7 @@ def contact_queue(
 @router.get("/dashboard")
 def dashboard(
     db: Session = Depends(get_db),
-    principal: Principal = Depends(require_roles("gestor")),
+    principal: Principal = Depends(require_roles("gestor", "admin")),
 ):
     classifications = dict(
         db.execute(

@@ -1,7 +1,9 @@
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 from sqlalchemy import select
 
 import backend.app.auth as api_auth
@@ -24,6 +26,11 @@ def firebase_api_client(db_session_factory, monkeypatch):
         "auditor-a": {"uid": "synthetic-auditor", "role": "auditor", "tenant_id": "tenant-a"},
         "auditor-b": {"uid": "synthetic-auditor-b", "role": "auditor", "tenant_id": "tenant-b"},
         "admin-a": {"uid": "synthetic-admin", "role": "admin", "tenant_id": "tenant-a"},
+        "admin-b": {
+            "uid": "synthetic-admin-b",
+            "role": "admin",
+            "tenant_id": "tenant-b",
+        },
         "gestor-a": {"uid": "synthetic-manager", "role": "gestor", "tenant_id": "tenant-a"},
         "no-role": {"uid": "synthetic-no-role", "tenant_id": "tenant-a"},
         "bad-role": {"uid": "synthetic-bad-role", "role": "owner", "tenant_id": "tenant-a"},
@@ -46,6 +53,8 @@ def test_health_is_public_but_business_data_requires_a_bearer_token(firebase_api
     response = firebase_api_client.get("/api/leads")
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
+    assert firebase_api_client.get("/api/dashboard").status_code == 401
+    assert firebase_api_client.get("/api/imports").status_code == 401
 
 
 def test_all_non_health_api_routes_publish_bearer_authentication():
@@ -146,6 +155,17 @@ def test_cors_rejects_wildcards_and_insecure_remote_origins():
     ).api_cors_origins == ["https://app.example.invalid", "http://localhost:3000"]
 
 
+def test_cors_origins_load_from_environment_as_json(monkeypatch):
+    monkeypatch.setenv(
+        "API_CORS_ORIGINS",
+        '["https://app.example.invalid","http://localhost:3000"]',
+    )
+    assert Settings(_env_file=None).api_cors_origins == [
+        "https://app.example.invalid",
+        "http://localhost:3000",
+    ]
+
+
 def test_roles_restrict_imports_leads_audits_and_metrics(firebase_api_client):
     def request(method, path, token, **kwargs):
         return firebase_api_client.request(
@@ -156,6 +176,7 @@ def test_roles_restrict_imports_leads_audits_and_metrics(firebase_api_client):
         )
 
     assert request("GET", "/api/dashboard", "gestor-a").status_code == 200
+    assert request("GET", "/api/dashboard", "admin-a").status_code == 200
     assert request("GET", "/api/leads", "gestor-a").status_code == 403
     assert request("GET", "/api/dashboard", "auditor-a").status_code == 403
     assert request("GET", "/api/leads", "admin-a").status_code == 403
@@ -165,6 +186,99 @@ def test_roles_restrict_imports_leads_audits_and_metrics(firebase_api_client):
     assert request("POST", "/api/leads/synthetic-id/audits", "gestor-a", json={}).status_code == 403
     assert request("GET", "/api/queues/contact", "gestor-a").status_code == 403
     assert request("GET", "/api/messages", "auditor-a").status_code == 404
+
+
+def test_admin_dashboard_remains_tenant_scoped(firebase_api_client, db_session_factory):
+    with db_session_factory() as session:
+        session.add_all(
+            [
+                Lead(tenant_id="tenant-a", classification="lost"),
+                Lead(tenant_id="tenant-b", classification="won"),
+            ]
+        )
+        session.commit()
+
+    response = firebase_api_client.get(
+        "/api/dashboard",
+        headers={"Authorization": "Bearer admin-a"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total_leads"] == 1
+    assert response.json()["classifications"] == {"lost": 1}
+
+
+def test_synthetic_xlsx_import_updates_only_the_admins_tenant_dashboard(
+    firebase_api_client,
+):
+    def workbook_for(email: str) -> bytes:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["Name", "Email", "Status", "Stage"])
+        sheet.append(["Synthetic Lead", email, "Qualified", "Research"])
+        output = BytesIO()
+        workbook.save(output)
+        return output.getvalue()
+
+    def import_for(token: str, email: str) -> str:
+        headers = {"Authorization": f"Bearer {token}"}
+        preview = firebase_api_client.post(
+            "/api/imports/preview",
+            headers=headers,
+            files={
+                "file": (
+                    "synthetic.xlsx",
+                    workbook_for(email),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert preview.status_code == 200
+        assert preview.json()["total_rows"] == 1
+        assert preview.json()["valid_rows"] == 1
+
+        import_id = preview.json()["import_id"]
+        confirmed = firebase_api_client.post(
+            f"/api/imports/{import_id}/confirm",
+            headers=headers,
+        )
+        assert confirmed.status_code == 200
+        assert confirmed.json()["imported_rows"] == 1
+        return import_id
+
+    tenant_a_import = import_for("admin-a", "tenant-a@example.invalid")
+    tenant_b_import = import_for("admin-b", "tenant-b@example.invalid")
+    admin_a_headers = {"Authorization": "Bearer admin-a"}
+    admin_b_headers = {"Authorization": "Bearer admin-b"}
+
+    tenant_a_dashboard = firebase_api_client.get(
+        "/api/dashboard", headers=admin_a_headers
+    )
+    tenant_b_dashboard = firebase_api_client.get(
+        "/api/dashboard", headers=admin_b_headers
+    )
+    tenant_a_imports = firebase_api_client.get(
+        "/api/imports", headers=admin_a_headers
+    )
+
+    assert tenant_a_dashboard.status_code == tenant_b_dashboard.status_code == 200
+    assert tenant_a_dashboard.json()["total_leads"] == 1
+    assert tenant_a_dashboard.json()["classifications"] == {"research": 1}
+    assert [item["id"] for item in tenant_a_dashboard.json()["recent_imports"]] == [
+        tenant_a_import
+    ]
+    assert tenant_b_dashboard.json()["total_leads"] == 1
+    assert tenant_b_dashboard.json()["classifications"] == {"research": 1}
+    assert tenant_a_imports.status_code == 200
+    assert [item["id"] for item in tenant_a_imports.json()] == [tenant_a_import]
+    assert tenant_a_imports.json()[0]["status"] == "completed"
+    assert tenant_a_imports.json()[0]["imported_rows"] == 1
+
+    foreign_confirm = firebase_api_client.post(
+        f"/api/imports/{tenant_b_import}/confirm",
+        headers=admin_a_headers,
+    )
+    assert foreign_confirm.status_code == 404
 
 
 def test_lead_lists_details_and_conversation_history_are_tenant_scoped(

@@ -1,4 +1,4 @@
-import { getApp, getApps, initializeApp } from "firebase/app";
+import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
@@ -16,20 +16,40 @@ const config = {
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "",
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "",
 };
+const appName = "bc-lead-intelligence";
+const expectedProjectId = "prime-amulet-439718-e3";
+
+function matchesConfig(app: FirebaseApp) {
+  return (
+    app.options.apiKey === config.apiKey &&
+    app.options.authDomain === config.authDomain &&
+    app.options.projectId === config.projectId &&
+    app.options.appId === config.appId
+  );
+}
 
 export type AppRole = "admin" | "auditor" | "gestor";
 
 export function isFirebaseConfigured() {
-  return Object.values(config).every(Boolean);
+  if (!Object.values(config).every(Boolean) || config.projectId !== expectedProjectId) {
+    return false;
+  }
+  const existingApp = getApps().find((item) => item.name === appName);
+  return !existingApp || matchesConfig(existingApp);
 }
 
 export function getFirebaseAuth(): Auth {
-  if (!isFirebaseConfigured()) {
+  if (!Object.values(config).every(Boolean)) {
     throw new Error("Firebase web app configuration is missing.");
   }
-  const app = getApps().some((item) => item.name === "bc-lead-intelligence")
-    ? getApp("bc-lead-intelligence")
-    : initializeApp(config, "bc-lead-intelligence");
+  if (config.projectId !== expectedProjectId) {
+    throw new Error("Firebase web app configuration uses an unexpected project.");
+  }
+  const existingApp = getApps().find((item) => item.name === appName);
+  if (existingApp && !matchesConfig(existingApp)) {
+    throw new Error("Firebase app is already initialized with a different configuration.");
+  }
+  const app = existingApp ?? initializeApp(config, appName);
   return getAuth(app);
 }
 
