@@ -1,6 +1,13 @@
-# BC Lead Intelligence
+# Lead Intelligence AI
 
 Aplicação local-first para importar, classificar e auditar leads. A Sprint 02 inclui auditoria simulada baseada em citações de mensagens autorizadas, histórico independente de conversas e preparo opt-in do Vertex AI. Não há envio de mensagens, integração mutável com Salesforce nem provisionamento de recursos Google Cloud.
+
+## Estado do produto
+
+- **Pronto localmente:** autenticação Firebase, perfis e isolamento por tenant; importação e auditoria da Sprint 02; Estúdio de IA e Base de Conhecimento local das duas primeiras entregas da Sprint 03.
+- **Pendente:** respostas e fluxos, simulações de conversas, avaliação/aprendizado supervisionado e integração WhatsApp em modo sem envio.
+- **Não implantado:** os ambientes Firebase App Hosting, Cloud Run e PostgreSQL ainda dependem de aprovação de custo e segurança. Nenhum recurso foi criado por este repositório.
+- **Validação consolidada mais recente:** 70 testes Python; typecheck e build do frontend aprovados; Alembic em `0009_knowledge_base`. Consulte [homologação da Sprint 02](./docs/sprint-02-homologation.md), [progresso da Sprint 03](./docs/sprint-03-progress.md) e [preparação de implantação](./docs/deployment-readiness.md).
 
 ## Requisitos
 
@@ -28,7 +35,7 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Preencha em `frontend/.env.local` os valores públicos da aplicação Web Firebase vinculada ao projeto confirmado; habilite o provedor de login escolhido no Firebase Authentication e reinicie o frontend. O acesso exige os custom claims `role` e `tenant_id` emitidos pelo backend operacional confiável. Abra `http://localhost:3000`. A API está em `http://localhost:8000`; documentação OpenAPI em `/docs`.
+Preencha em `frontend/.env.local` os valores públicos da aplicação Web Firebase vinculada ao projeto confirmado; habilite o provedor de login escolhido no Firebase Authentication e reinicie o frontend. O acesso exige os custom claims `role` e `tenant_id` emitidos pelo backend operacional confiável. `API_CORS_ORIGINS` deve ser uma lista JSON, por exemplo `["http://localhost:3000"]`. Abra `http://localhost:3000`. A API está em `http://localhost:8000`; documentação OpenAPI em `/docs`.
 
 Para PostgreSQL, defina `DATABASE_URL` no `.env` com uma URL `postgresql+psycopg://...`. Mantenha senhas apenas no `.env` local, que é ignorado pelo Git. Execute `uv run alembic upgrade head` depois de configurar a URL.
 
@@ -54,6 +61,8 @@ Não há planilha Salesforce original neste repositório. Os testes usam apenas 
 - Nenhum bucket, banco Cloud SQL, serviço, API ou outro recurso GCP é criado ou habilitado por esta aplicação.
 - SQLite é adequado somente para desenvolvimento local; use PostgreSQL gerenciado/operado com backups, rede privada, segredo externo e controle de acesso antes de produção.
 - A API e o frontend têm autenticação, autorização por role e escopo por tenant. Antes de expor ou implantar, configure os provedores e valores oficiais do Firebase Web, ADC/IAM de runtime, origens CORS, limites compartilhados e migração revisada dos dados legados.
+- O bootstrap do primeiro administrador de cada organização é um comando operacional interativo, não uma rota da API. Consulte [docs/security.md](./docs/security.md) e [docs/sprint-03-readiness.md](./docs/sprint-03-readiness.md).
+- Para configurar o primeiro login Firebase local, siga [docs/first-admin-login.md](./docs/first-admin-login.md).
 
 ## Verificações
 
@@ -146,6 +155,7 @@ npm.cmd run build
 - `backend/app`: API FastAPI, modelos, importador, classificação e arquitetura Vertex AI.
 - `backend/migrations`: esquema versionado Alembic.
 - `frontend/app`: interface Next.js, TypeScript e Tailwind CSS.
+- `frontend/components`: Estúdio de IA e Base de Conhecimento.
 - `tests`: testes com planilhas e dados fictícios.
 - `docs`: decisões, classificação e integrações futuras.
 
