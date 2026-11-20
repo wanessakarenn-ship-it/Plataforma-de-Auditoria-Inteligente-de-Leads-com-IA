@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     vertex_ai_prompt_version: str = "evidence-audit-v1"
     max_import_rows: int = 10_000
     max_import_file_mb: int = 20
+    knowledge_max_file_mb: int = Field(default=5, ge=1, le=25)
+    knowledge_max_extracted_chars: int = Field(default=500_000, ge=1_000, le=2_000_000)
     audit_max_batch_size: int = Field(default=20, ge=1, le=100)
     audit_timeout_seconds: int = Field(default=30, ge=1, le=120)
     message_retention_days: int = Field(default=90, ge=1, le=365)

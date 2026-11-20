@@ -8,6 +8,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as SQLAlchemySession
 
 from backend.app.api.audits import router as audit_router
+from backend.app.api.knowledge import router as knowledge_router
+from backend.app.api.studio import router as studio_router
 from backend.app.api.routes import router
 from backend.app.config import get_settings
 from backend.app.models import AdminActionLog
@@ -29,7 +31,7 @@ async def lifespan(_: FastAPI):
             await cleanup_task
 
 
-app = FastAPI(title="BC Lead Intelligence API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Lead Intelligence AI API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.api_cors_origins,
@@ -59,5 +61,7 @@ async def finalize_authorized_action_log(request, call_next):
 
 app.include_router(router, prefix="/api")
 app.include_router(audit_router, prefix="/api")
+app.include_router(studio_router, prefix="/api")
+app.include_router(knowledge_router, prefix="/api")
 
 __all__ = ["app", "VertexAuditNotConfigured"]

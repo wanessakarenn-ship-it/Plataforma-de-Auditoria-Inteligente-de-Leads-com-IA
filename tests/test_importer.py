@@ -42,7 +42,7 @@ def test_excel_header_detection_and_full_name_split():
 def test_salesforce_november_export_maps_localized_columns_and_types():
     content = (
         "Salesforce report export; November 2026\n"
-        "BC Lead Intelligence; informational row\n"
+        "Lead Intelligence AI; informational row\n"
         "Data de criação;Fase;Status do lead;Campanha BC;Origem do Lead;"
         "Sobrenome;Email;Celular;Valor Mensal da Conta;Descrição do Motivo;"
         "Motivo da perda;Descrição Motivo\n"

@@ -10,6 +10,8 @@ import {
   signOutFromFirebase,
   type AppRole,
 } from "../lib/firebase";
+import AIStudio from "../components/ai-studio";
+import KnowledgeBase from "../components/knowledge-base";
 
 type Lead = {
   id: string;
@@ -141,7 +143,9 @@ type Section =
   | "audit"
   | "contact"
   | "loss"
-  | "disqualification";
+  | "disqualification"
+  | "ai-studio"
+  | "knowledge";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
@@ -158,6 +162,8 @@ const navigation: Array<{ id: Section; label: string; icon: string; group: strin
     icon: "⊘",
     group: "Inteligência",
   },
+  { id: "ai-studio", label: "Estúdio de IA", icon: "✳", group: "Administração" },
+  { id: "knowledge", label: "Base de Conhecimento", icon: "▤", group: "Administração" },
 ];
 
 const classLabels: Record<string, string> = {
@@ -272,7 +278,7 @@ export default function Home() {
                 ? claimRole
                 : null;
             setRole(allowedRole);
-            if (allowedRole === "admin") setSection("imports");
+            if (allowedRole === "admin") setSection("overview");
             else if (allowedRole === "gestor") setSection("overview");
             else if (allowedRole === "auditor") setSection("leads");
             setAuthReady(true);
@@ -326,9 +332,15 @@ export default function Home() {
     setError("");
     try {
       if (role === "admin") {
-        const response = await fetchWithFirebaseToken(`${API_URL}/imports`, { cache: "no-store" });
-        if (!response.ok) throw new Error("Não foi possível carregar as importações.");
-        setImports(await response.json());
+        const [dashboardResponse, importsResponse] = await Promise.all([
+          fetchWithFirebaseToken(`${API_URL}/dashboard`, { cache: "no-store" }),
+          fetchWithFirebaseToken(`${API_URL}/imports`, { cache: "no-store" }),
+        ]);
+        if (!dashboardResponse.ok || !importsResponse.ok) {
+          throw new Error("Não foi possível carregar o painel administrativo.");
+        }
+        setDashboard(await dashboardResponse.json());
+        setImports(await importsResponse.json());
       } else if (role === "gestor") {
         const response = await fetchWithFirebaseToken(`${API_URL}/dashboard`, { cache: "no-store" });
         if (!response.ok) throw new Error("Não foi possível carregar os indicadores.");
@@ -434,7 +446,7 @@ export default function Home() {
 
   const allowedSections =
     role === "admin"
-      ? ["imports"]
+      ? ["overview", "imports", "ai-studio", "knowledge"]
       : role === "gestor"
         ? ["overview"]
         : ["leads", "audit", "contact", "loss", "disqualification"];
@@ -465,7 +477,7 @@ export default function Home() {
     return (
       <main className="auth-screen">
         <section className="panel auth-panel">
-          <div className="brand-name">BC Intelligence</div>
+          <div className="brand-name">Lead Intelligence AI</div>
           <h1>{user ? "Acesso não autorizado" : "Entrar na plataforma"}</h1>
           {user ? (
             <>
@@ -499,22 +511,22 @@ export default function Home() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">B</div>
+          <div className="brand-mark">L</div>
           <div>
-            <div className="brand-name">BC Intelligence</div>
+            <div className="brand-name">Lead Intelligence AI</div>
             <div className="brand-caption">LEAD OPERATIONS</div>
           </div>
         </div>
         <div className="workspace-switch">
-          <div className="workspace-avatar">BC</div>
+          <div className="workspace-avatar">LI</div>
           <div className="workspace-copy">
-            <strong>BC Energia</strong>
-            <span>Workspace principal</span>
+            <strong>Organização</strong>
+            <span>Workspace atual</span>
           </div>
           <span className="chevron">⌄</span>
         </div>
         <nav className="navigation" aria-label="Navegação principal">
-          {(["Workspace", "Gestão comercial", "Inteligência"] as const).map((group) => (
+          {(["Workspace", "Gestão comercial", "Inteligência", "Administração"] as const).map((group) => (
             <div className="nav-group" key={group}>
               <div className="nav-heading">{group}</div>
               {visibleNavigation
@@ -544,7 +556,7 @@ export default function Home() {
             </div>
           </div>
           <div className="user-profile">
-            <div className="user-avatar">BC</div>
+            <div className="user-avatar">LI</div>
             <div className="user-copy">
               <strong>{user.email ?? "Conta autenticada"}</strong>
               <span>{roleLabels[role]}</span>
@@ -557,7 +569,7 @@ export default function Home() {
       <main className="main-area">
         <header className="topbar">
           <div className="breadcrumbs">
-            <span>BC Lead Intelligence</span>
+            <span>Lead Intelligence AI</span>
             <span className="crumb-separator">/</span>
             <strong>{pageTitle}</strong>
           </div>
@@ -566,24 +578,30 @@ export default function Home() {
             <button className="icon-button" aria-label="Atualizar dados" onClick={() => void loadData()}>
               ↻
             </button>
-            <div className="top-avatar">BC</div>
+            <div className="top-avatar">LI</div>
           </div>
         </header>
 
         <div className="page-content">
           <div className="page-heading">
             <div>
-              <div className="eyebrow">LEAD INTELLIGENCE · SPRINT 02</div>
+              <div className="eyebrow">
+                LEAD INTELLIGENCE · {section === "ai-studio" || section === "knowledge" ? "SPRINT 03" : "SPRINT 02"}
+              </div>
               <h1>{section === "overview" ? "Visão geral" : pageTitle}</h1>
               <p>
                 {section === "overview"
                   ? "Saúde da operação, qualidade dos dados e próximos passos."
                   : section === "imports"
                     ? "Importe uma exportação Salesforce, revise os dados e confirme quando estiver pronto."
+                    : section === "ai-studio"
+                      ? "Cadastre e versione agentes por organização; publicação exige aprovação humana."
+                    : section === "knowledge"
+                      ? "Gerencie fontes versionadas e pré-visualize referências recuperadas localmente."
                     : "Acompanhe e revise registros. Ações externas permanecem desativadas."}
               </p>
             </div>
-            {role === "admin" && section !== "imports" && (
+            {role === "admin" && section === "overview" && (
               <button className="primary-button" onClick={() => setSection("imports")}>
                 <span>＋</span> Importar leads
               </button>
@@ -667,13 +685,15 @@ export default function Home() {
                 </section>
               </div>
 
-              <section className="panel table-panel">
-                <div className="panel-header">
-                  <div><h2>Leads adicionados recentemente</h2><p>Últimos registros da base</p></div>
-                  <button className="text-button" onClick={() => setSection("leads")}>Ver base completa ↗</button>
-                </div>
-                <LeadTable leads={leads.slice(0, 5)} onSelect={(lead) => void showLead(lead)} />
-              </section>
+              {role !== "admin" && (
+                <section className="panel table-panel">
+                  <div className="panel-header">
+                    <div><h2>Leads adicionados recentemente</h2><p>Últimos registros da base</p></div>
+                    <button className="text-button" onClick={() => setSection("leads")}>Ver base completa ↗</button>
+                  </div>
+                  <LeadTable leads={leads.slice(0, 5)} onSelect={(lead) => void showLead(lead)} />
+                </section>
+              )}
               <p className="footer-note"><span>◈</span> Fila de auditoria e fila de contato são independentes. Nenhuma mensagem é enviada.</p>
             </>
           )}
@@ -759,6 +779,8 @@ export default function Home() {
               />
             </section>
           )}
+          {section === "ai-studio" && role === "admin" && <AIStudio />}
+          {section === "knowledge" && role === "admin" && <KnowledgeBase />}
         </div>
       </main>
     </div>
