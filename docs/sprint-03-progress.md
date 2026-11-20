@@ -3,8 +3,8 @@
 ## Entrega incremental 1 — Estúdio de IA: cadastro de agentes
 
 O escopo desta entrega cobriu o registro administrativo de agentes. A Base de
-Conhecimento foi concluída na Entrega 2 abaixo; respostas/simulações, avaliação
-supervisionada e WhatsApp permanecem pendentes para incrementos separados.
+Conhecimento foi concluída na Entrega 2 abaixo; a simulação de conversas está
+descrita na Entrega 3.
 
 ### Contratos e segurança
 
@@ -88,7 +88,69 @@ supervisionada e WhatsApp permanecem pendentes para incrementos separados.
 - `npm.cmd run typecheck` e `npm.cmd run build`: aprovados.
 - `git diff --check`: aprovado.
 
+## Entrega incremental 3 — Karen e jornada comercial simulada
+
+### Cadastro e comportamento
+
+- `POST /api/studio/agents/karen-template` cria Karen idempotentemente por tenant,
+  como rascunho inativo, versão 1, modelo `local-simulated`, custo zero e sem execução.
+- Identidade, tom acolhedor, instruções, prompt de sistema, critérios de decisão,
+  segurança e transferência humana ficam versionados nos snapshots do Estúdio de IA.
+- Karen identifica-se como assistente virtual. A Base de Conhecimento existente é
+  consultada somente por vínculo com agente e conteúdo aprovado/vigente; referências
+  recuperadas são preservadas como evidência e não executam instruções das fontes.
+
+### Jornada, simulações e segurança
+
+- Migração aditiva `0010_karen_simulations` cria jornadas e eventos isolados por
+  `tenant_id`. Não altera `0008_ai_agent_registry` nem `0009_knowledge_base`.
+  Eventos têm sequência única por jornada e a API não oferece edição ou exclusão
+  de evidências.
+- Estados incluem elegibilidade, confirmação, interesse, qualificação, proposta,
+  negociação, documentação, contrato, assinatura simulada e pós-venda, além de
+  opt-out, sem interesse, bloqueio, suspensão e transferência humana.
+- Dez cenários são fictícios e não se associam a leads. A API rejeita e-mail e
+  telefone no texto livre, registra turnos e decisões, referências aprovadas e
+  avaliações determinísticas de gentileza, conformidade e precisão.
+- Opt-out impede novos turnos e transições comerciais. Elegibilidade, proposta,
+  preparação de contrato, link fictício e assinatura simulada exigem aprovação
+  humana autenticada; a aprovação é registrada e consumida na trilha de eventos.
+- Sem integração de WhatsApp, CRM ou fornecedor contratual. Não há envio automático,
+  documento jurídico ou contratação real; links de contrato usam domínio `.invalid`.
+- O contrato provider-neutral `ElectronicSignatureProvider` define operações futuras
+  de criação/consulta de envelope, sem implementação, credenciais ou chamadas externas.
+- `GET /api/karen/config`, endpoints `/api/karen/simulations` e sub-recursos de
+  `turns`, `actions` e `approvals` permitem consultar a máquina e executar o simulador.
+  Admins e gestores podem simular e aprovar ações sensíveis; auditores não têm acesso.
+
+### Interface
+
+- A área “Karen · Simulador” consulta configuração, cenários e jornadas por tenant,
+  apresenta conversa/trilha/evidências, permite aplicar transições e registrar
+  aprovações humanas. O Estúdio de IA oferece a criação do rascunho da Karen e edição
+  do prompt versionado; a Base de Conhecimento permanece reutilizada.
+
 ### Pendências restantes da Sprint 03
+
+1. Ampliar a avaliação supervisionada com exemplos aprovados e revisão humana de
+   métricas; as notas automáticas atuais são verificações locais determinísticas.
+2. Onboarding, convite e remoção de usuários para novas organizações com autorização
+   mínima e trilha de auditoria. O bootstrap permanece restrito ao primeiro admin.
+3. Definir IDs estáveis para novos tenants e revisar registros legados sem tenant;
+   não atribuí-los automaticamente a uma organização.
+4. Antes de dados de clientes em ambiente compartilhado, aprovar retenção e base de
+   uso, IAM de runtime, origens HTTPS CORS, limites, PostgreSQL, backups e observabilidade.
+5. Manter inferência paga, envio de mensagens e deploy bloqueados até autorização e
+   critérios próprios de aceite. Integrações reais permanecem fora deste incremento.
+
+### Verificações da Entrega 3
+
+- `uv run pytest`: 79 aprovados; 1 aviso de depreciação proveniente de `google-genai`.
+- `uv run alembic current`: `0010_karen_simulations` (head); `uv run alembic check`:
+  nenhuma operação nova detectada.
+- `npm.cmd run typecheck` e `npm.cmd run build` (em `frontend/`): aprovados.
+- `git diff --check`: aprovado.
+- Nenhum deploy, inferência paga, envio WhatsApp, alteração Salesforce ou recurso pago.
 
 1. Construir editor de respostas e fluxos, simulações exclusivamente fictícias e
    comparação de versões com desempenho observado.
@@ -102,9 +164,9 @@ supervisionada e WhatsApp permanecem pendentes para incrementos separados.
 
 ## Situação consolidada
 
-Em 2026-11-20, as entregas 1 e 2 da Sprint 03 estão concluídas e verificadas
-localmente: 70 testes Python aprovados, typecheck/build aprovados e Alembic em
-`0009_knowledge_base`. A Sprint 02 permanece homologada localmente; nenhum deploy foi
-feito. O plano de publicação e implantação está em
+Em 2026-11-20, as entregas incrementais 1, 2 e 3 estão implementadas localmente:
+79 testes passaram, typecheck/build foram aprovados e Alembic está em
+`0010_karen_simulations`. A Sprint 02 permanece homologada localmente; nenhum deploy
+foi feito. O plano de publicação e implantação está em
 [deployment-readiness.md](./deployment-readiness.md) e exige aprovação de custos e
 segurança antes de qualquer publicação ou provisionamento.

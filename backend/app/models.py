@@ -464,3 +464,60 @@ class AIAgentVersion(Base):
     created_by_uid: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     agent: Mapped[AIAgent] = relationship(back_populates="versions")
+
+
+class KarenSimulation(Base, Timestamped):
+    __tablename__ = "karen_simulations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_karen_simulations_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "agent_id"],
+            ["ai_agents.tenant_id", "ai_agents.id"],
+            ondelete="RESTRICT",
+        ),
+        Index("ix_karen_simulations_tenant_state", "tenant_id", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    scenario_key: Mapped[str] = mapped_column(String(48), nullable=False)
+    state: Mapped[str] = mapped_column(String(48), nullable=False)
+    created_by_uid: Mapped[str] = mapped_column(String(128), nullable=False)
+
+
+class KarenSimulationEvent(Base):
+    __tablename__ = "karen_simulation_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "simulation_id"],
+            ["karen_simulations.tenant_id", "karen_simulations.id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "simulation_id",
+            "sequence_no",
+            name="uq_karen_simulation_event_sequence",
+        ),
+        Index(
+            "ix_karen_simulation_events_tenant_simulation",
+            "tenant_id",
+            "simulation_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    simulation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    from_state: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    to_state: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence_json: Mapped[list] = mapped_column(JSON, default=list)
+    evaluation_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    actor_uid: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

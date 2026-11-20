@@ -22,6 +22,7 @@ type AgentDraft = {
 
 type Agent = AgentDraft & {
   id: string;
+  template_key: string | null;
   publication_state: "draft" | "approved" | "published";
   is_active: boolean;
   execution_enabled: false;
@@ -113,6 +114,25 @@ export default function AIStudio() {
       setNotice("Modelos iniciais criados como rascunhos; nenhum agente executa inferência.");
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Falha ao criar modelos.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createKarenTemplate() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetchWithFirebaseToken(
+        `${API_URL}/studio/agents/karen-template`,
+        { method: "POST" },
+      );
+      const agent = await readResponse(response);
+      setNotice(`Karen criada como rascunho inativo, versão ${agent.current_version}.`);
+      await loadAgents();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Falha ao criar Karen.");
     } finally {
       setBusy(false);
     }
@@ -225,6 +245,7 @@ export default function AIStudio() {
   function editAgent(agent: Agent) {
     const {
       id: _id,
+      template_key: _templateKey,
       publication_state: _publicationState,
       is_active: _isActive,
       execution_enabled: _executionEnabled,
@@ -263,6 +284,16 @@ export default function AIStudio() {
           <p>Prompts são versionados; publicar exige aprovação humana.</p>
         </div>
         <div className="studio-toolbar-actions">
+          {!agents.some((agent) => agent.template_key === "karen-commercial-assistant") && (
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={busy}
+              onClick={() => void createKarenTemplate()}
+            >
+              Criar rascunho da Karen
+            </button>
+          )}
           <button
             className="secondary-button"
             type="button"
@@ -301,7 +332,7 @@ export default function AIStudio() {
             ) : agents.length === 0 ? (
               <section className="panel">
                 <div className="empty-state">
-                  Nenhum agente cadastrado neste tenant. Crie os dois modelos iniciais ou comece um rascunho.
+                  Nenhum agente cadastrado neste tenant. Crie Karen ou comece um rascunho personalizado.
                 </div>
               </section>
             ) : agents.map((agent) => (
