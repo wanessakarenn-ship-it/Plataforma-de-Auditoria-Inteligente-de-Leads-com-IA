@@ -4,10 +4,10 @@ Aplicação local-first para importar, classificar e auditar leads. A Sprint 02 
 
 ## Estado do produto
 
-- **Pronto localmente:** autenticação Firebase, perfis e isolamento por tenant; importação e auditoria da Sprint 02; Estúdio de IA e Base de Conhecimento local das duas primeiras entregas da Sprint 03.
-- **Pendente:** respostas e fluxos, simulações de conversas, avaliação/aprendizado supervisionado e integração WhatsApp em modo sem envio.
-- **Não implantado:** os ambientes Firebase App Hosting, Cloud Run e PostgreSQL ainda dependem de aprovação de custo e segurança. Nenhum recurso foi criado por este repositório.
-- **Validação consolidada mais recente:** 70 testes Python; typecheck e build do frontend aprovados; Alembic em `0009_knowledge_base`. Consulte [homologação da Sprint 02](./docs/sprint-02-homologation.md), [progresso da Sprint 03](./docs/sprint-03-progress.md) e [preparação de implantação](./docs/deployment-readiness.md).
+- **Pronto localmente:** autenticação Firebase, perfis e isolamento por tenant; importação e auditoria; Estúdio de IA, Base de Conhecimento e simulador Karen com jornada comercial sintética.
+- **Pendente:** publicação do frontend de prévia e integrações reais. O frontend-only bloqueia operações que dependem do FastAPI; não envia mensagens nem conclui contratos.
+- **Não implantado:** nenhum backend App Hosting, Cloud Run, banco ou serviço foi criado. A publicação depende de confirmar plano, faturamento, IAM, APIs, quotas e aprovação de custo.
+- **Validação da entrega Karen:** 79 testes Python; typecheck e build do frontend aprovados; Alembic em `0010_karen_simulations`. Consulte [homologação da Sprint 02](./docs/sprint-02-homologation.md), [progresso da Sprint 03](./docs/sprint-03-progress.md) e [preparação de implantação](./docs/deployment-readiness.md).
 
 ## Requisitos
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { fetchWithFirebaseToken } from "../lib/firebase";
+import { fetchWithFirebaseToken, getBackendUnavailableReason } from "../lib/firebase";
 
 type Scenario = { key: string; title: string };
 type AgentConfig = {
@@ -53,7 +53,19 @@ type Config = {
   };
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const previewScenarios = [
+  "Lead realmente sem interesse",
+  "Lead desqualificado incorretamente",
+  "Lead interessado em retomar a negociação",
+  "Lead com dúvidas sobre a proposta",
+  "Lead solicitando desconto não autorizado",
+  "Lead solicitando atendimento humano",
+  "Lead recusando o contato",
+  "Lead aceitando uma proposta simulada",
+  "Lead aguardando assinatura",
+  "Lead com contrato simulado assinado",
+];
 
 async function readResponse<T>(response: Response): Promise<T> {
   const body = await response.json();
@@ -80,6 +92,12 @@ export default function KarenSimulator({
   async function load() {
     setLoading(true);
     setError("");
+    const unavailableReason = getBackendUnavailableReason();
+    if (unavailableReason) {
+      setLoading(false);
+      setError(unavailableReason);
+      return;
+    }
     try {
       const [configResponse, simulationsResponse] = await Promise.all([
         fetchWithFirebaseToken(`${API_URL}/karen/config`, { cache: "no-store" }),
@@ -122,6 +140,26 @@ export default function KarenSimulator({
       ),
     [config, selected],
   );
+
+  const backendUnavailableReason = getBackendUnavailableReason();
+  if (backendUnavailableReason) {
+    return (
+      <div className="karen-layout">
+        <div className="alert alert-error" role="status">{backendUnavailableReason}</div>
+        <section className="panel karen-scenarios">
+          <div className="panel-header">
+            <div>
+              <h2>Cenários disponíveis para visualização</h2>
+              <p>Somente exemplos sintéticos; iniciar ou registrar simulações exige o backend.</p>
+            </div>
+          </div>
+          <ol className="preview-scenarios">
+            {previewScenarios.map((scenario) => <li key={scenario}>{scenario}</li>)}
+          </ol>
+        </section>
+      </div>
+    );
+  }
 
   async function createSimulation() {
     if (!scenarioKey) return;

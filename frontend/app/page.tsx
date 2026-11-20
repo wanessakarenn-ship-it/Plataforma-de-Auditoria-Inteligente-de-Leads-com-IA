@@ -3,7 +3,9 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchWithFirebaseToken,
+  getBackendUnavailableReason,
   isFirebaseConfigured,
+  isPreviewEnvironment,
   observeFirebaseUser,
   signInWithEmail,
   signInWithGoogle,
@@ -149,7 +151,7 @@ type Section =
   | "knowledge"
   | "karen";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 const navigation: Array<{ id: Section; label: string; icon: string; group: string }> = [
   { id: "overview", label: "Visão geral", icon: "◫", group: "Workspace" },
@@ -209,7 +211,7 @@ function MetricCard({
   tone,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   note: string;
   icon: string;
   tone: string;
@@ -218,7 +220,7 @@ function MetricCard({
     <article className="metric-card">
       <div className={`metric-icon ${tone}`}>{icon}</div>
       <div className="metric-label">{label}</div>
-      <div className="metric-value">{value.toLocaleString("pt-BR")}</div>
+      <div className="metric-value">{typeof value === "number" ? value.toLocaleString("pt-BR") : value}</div>
       <div className="metric-note">{note}</div>
     </article>
   );
@@ -331,6 +333,17 @@ export default function Home() {
 
   const loadData = useCallback(async () => {
     if (!role) return;
+    if (getBackendUnavailableReason()) {
+      setDashboard(null);
+      setLeads([]);
+      setAuditQueue([]);
+      setContactQueue([]);
+      setImports([]);
+      setReasons({ loss: [], disqualification: [] });
+      setLoading(false);
+      setError("");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -366,7 +379,7 @@ export default function Home() {
     } catch (loadError) {
       setError(
         loadError instanceof Error
-          ? `${loadError.message} Verifique se a API está em execução.`
+          ? loadError.message
           : "Falha ao carregar o painel.",
       );
     } finally {
@@ -469,8 +482,15 @@ export default function Home() {
     return (
       <main className="auth-screen">
         <section className="panel auth-panel">
+          {(isPreviewEnvironment || getBackendUnavailableReason()) && (
+            <div className="preview-login-badge">Ambiente de testes</div>
+          )}
           <h1>Autenticação não configurada</h1>
-          <p>Configure as variáveis públicas do Firebase Web em <code>frontend/.env.local</code> e reinicie o frontend.</p>
+          <p>
+            Configure as variáveis públicas da Firebase Web App no App Hosting
+            {isPreviewEnvironment ? " ou em frontend/.env.local para desenvolvimento local" : " em frontend/.env.local"}
+            . Reinicie o frontend após configurar.
+          </p>
         </section>
       </main>
     );
@@ -481,6 +501,9 @@ export default function Home() {
       <main className="auth-screen">
         <section className="panel auth-panel">
           <div className="brand-name">Lead Intelligence AI</div>
+          {(isPreviewEnvironment || getBackendUnavailableReason()) && (
+            <div className="preview-login-badge">Ambiente de testes · operações sem backend</div>
+          )}
           <h1>{user ? "Acesso não autorizado" : "Entrar na plataforma"}</h1>
           {user ? (
             <>
@@ -489,7 +512,7 @@ export default function Home() {
             </>
           ) : (
             <>
-              <p>Use uma conta autorizada pela organização. O acesso é validado pela API.</p>
+              <p>Use uma conta autorizada pela organização. A autenticação usa Firebase; operações de dados exigem o backend.</p>
               <form className="auth-form" onSubmit={(event) => void handleEmailSignIn(event)}>
                 <label htmlFor="login-email">E-mail</label>
                 <input id="login-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -499,9 +522,15 @@ export default function Home() {
                   {authBusy ? "Autenticando..." : "Entrar"}
                 </button>
               </form>
-              <button className="secondary-button auth-google-button" onClick={() => void handleGoogleSignIn()} disabled={authBusy}>
-                Entrar com Google
-              </button>
+              {isPreviewEnvironment ? (
+                <button className="secondary-button auth-google-button" type="button" disabled>
+                  Login com Google indisponível: provedor não habilitado
+                </button>
+              ) : (
+                <button className="secondary-button auth-google-button" onClick={() => void handleGoogleSignIn()} disabled={authBusy}>
+                  Entrar com Google
+                </button>
+              )}
             </>
           )}
           {authError && <div className="alert alert-error" role="alert">{authError}</div>}
@@ -577,7 +606,7 @@ export default function Home() {
             <strong>{pageTitle}</strong>
           </div>
           <div className="topbar-actions">
-            <span className="environment"><i /> Ambiente local</span>
+            <span className="environment"><i /> {getBackendUnavailableReason() ? "Ambiente de testes" : "Ambiente local"}</span>
             <button className="icon-button" aria-label="Atualizar dados" onClick={() => void loadData()}>
               ↻
             </button>
@@ -613,6 +642,19 @@ export default function Home() {
             )}
           </div>
 
+          {(isPreviewEnvironment || getBackendUnavailableReason()) && (
+            <div className="safety-banner preview-banner" role="status">
+              <span>!</span>
+              <div>
+                <strong>Ambiente de testes — backend não publicado</strong>
+                <p>
+                  A autenticação e os controles de acesso permanecem ativos. Nenhum dado real é carregado
+                  e operações que dependem do FastAPI ficam indisponíveis; esta interface não simula sucesso.
+                </p>
+              </div>
+            </div>
+          )}
+
           {(error || notice) && (
             <div className={`alert ${error ? "alert-error" : "alert-success"}`}>
               <span>{error ? "!" : "✓"}</span>
@@ -628,10 +670,10 @@ export default function Home() {
           {section === "overview" && (
             <>
               <div className="metric-grid">
-                <MetricCard label="Leads na base" value={dashboard?.total_leads ?? 0} note="Registros importados" icon="◎" tone="blue" />
-                <MetricCard label="Na fila de auditoria" value={dashboard?.queues.audit_pending ?? 0} note="Aguardando análise" icon="◉" tone="violet" />
-                <MetricCard label="Contato em rascunho" value={dashboard?.queues.contact_drafts ?? 0} note="Elegibilidade pendente" icon="◇" tone="amber" />
-                <MetricCard label="Prontos para contato" value={dashboard?.queues.contact_eligible ?? 0} note="Exigem aprovação manual" icon="✓" tone="green" />
+                <MetricCard label="Leads na base" value={dashboard?.total_leads ?? "—"} note={dashboard ? "Registros importados" : "Dados não carregados"} icon="◎" tone="blue" />
+                <MetricCard label="Na fila de auditoria" value={dashboard?.queues.audit_pending ?? "—"} note={dashboard ? "Aguardando análise" : "Dados não carregados"} icon="◉" tone="violet" />
+                <MetricCard label="Contato em rascunho" value={dashboard?.queues.contact_drafts ?? "—"} note={dashboard ? "Elegibilidade pendente" : "Dados não carregados"} icon="◇" tone="amber" />
+                <MetricCard label="Prontos para contato" value={dashboard?.queues.contact_eligible ?? "—"} note={dashboard ? "Exigem aprovação manual" : "Dados não carregados"} icon="✓" tone="green" />
               </div>
 
               <div className="content-grid">
@@ -652,7 +694,7 @@ export default function Home() {
                           <span className={`classification-dot dot-${key}`} />
                           <span className="classification-name">{label}</span>
                           <div className="bar-track"><span style={{ width: `${total ? (count / total) * 100 : 0}%` }} /></div>
-                          <strong>{count}</strong>
+                          <strong>{dashboard ? count : "—"}</strong>
                         </div>
                       );
                     })}
@@ -668,7 +710,11 @@ export default function Home() {
                   </div>
                   <div className="recent-list">
                     {(dashboard?.recent_imports ?? []).length === 0 && (
-                      <div className="empty-state compact">Nenhuma importação ainda.</div>
+                      <div className="empty-state compact">
+                        {getBackendUnavailableReason()
+                          ? "Histórico indisponível neste ambiente de testes."
+                          : "Nenhuma importação ainda."}
+                      </div>
                     )}
                     {(dashboard?.recent_imports ?? []).map((item) => (
                       <div className="recent-item" key={item.id}>

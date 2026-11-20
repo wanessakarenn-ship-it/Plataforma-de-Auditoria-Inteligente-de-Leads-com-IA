@@ -81,7 +81,7 @@ type Retrieval = {
   }>;
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const categories: Array<{ value: KnowledgeCategory; label: string }> = [
   { value: "text", label: "Texto" },
   { value: "faq", label: "Pergunta frequente" },
