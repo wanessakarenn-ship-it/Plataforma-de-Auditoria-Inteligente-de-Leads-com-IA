@@ -1,7 +1,14 @@
+from datetime import datetime
+from decimal import Decimal
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from firebase_admin import auth as firebase_auth
+from firebase_admin import exceptions as firebase_exceptions
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from backend.app.auth import Principal, get_firebase_admin_app, require_roles
 from backend.app.classification import audit_required
 from backend.app.config import get_settings
 from backend.app.db import get_db
@@ -22,10 +29,12 @@ from backend.app.schemas import (
     ImportPreviewResponse,
     LeadResponse,
     QueueSummary,
+    AdminUserRoleUpdate,
 )
 from backend.app.services.vertex_audit import VertexAuditNotConfigured
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _record_log(
@@ -44,11 +53,15 @@ def _record_log(
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "bc-lead-intelligence-api"}
+    return {"status": "ok", "service": "lead-intelligence-ai-api"}
 
 
 @router.post("/imports/preview", response_model=ImportPreviewResponse)
-async def preview_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def preview_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("admin")),
+):
     settings = get_settings()
     filename = file.filename or "upload"
     if not filename.lower().endswith((".csv", ".xlsx", ".xlsm")):
@@ -90,7 +103,8 @@ async def preview_import(file: UploadFile = File(...), db: Session = Depends(get
     if existing_conditions:
         existing_leads = db.execute(
             select(Lead.external_id, Lead.email_normalized, Lead.phone_normalized).where(
-                or_(*existing_conditions)
+                or_(*existing_conditions),
+                Lead.tenant_id == principal.tenant_id,
             )
         ).all()
         for external_id, email, phone in existing_leads:
@@ -118,6 +132,7 @@ async def preview_import(file: UploadFile = File(...), db: Session = Depends(get
         row["duplicate_in_file"] or row["duplicate_in_database"] for row in checked
     )
     batch = ImportBatch(
+        tenant_id=principal.tenant_id,
         filename=filename[:255],
         file_type=filename.rsplit(".", 1)[-1].lower(),
         mapping=parsed.mapping,
@@ -150,8 +165,17 @@ async def preview_import(file: UploadFile = File(...), db: Session = Depends(get
 
 
 @router.post("/imports/{import_id}/confirm", response_model=ImportConfirmResponse)
-def confirm_import(import_id: str, db: Session = Depends(get_db)):
-    batch = db.get(ImportBatch, import_id)
+def confirm_import(
+    import_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("admin")),
+):
+    batch = db.scalar(
+        select(ImportBatch).where(
+            ImportBatch.id == import_id,
+            ImportBatch.tenant_id == principal.tenant_id,
+        )
+    )
     if batch is None:
         raise HTTPException(404, "Importação não encontrada.")
     if batch.status != "preview":
@@ -169,20 +193,44 @@ def confirm_import(import_id: str, db: Session = Depends(get_db)):
                 continue
             lead = None
             if values["external_id"]:
-                lead = db.scalar(select(Lead).where(Lead.external_id == values["external_id"]))
+                lead = db.scalar(
+                    select(Lead).where(
+                        Lead.external_id == values["external_id"],
+                        Lead.tenant_id == principal.tenant_id,
+                    )
+                )
             if lead is None and values["email_normalized"]:
                 lead = db.scalar(
-                    select(Lead).where(Lead.email_normalized == values["email_normalized"])
+                    select(Lead).where(
+                        Lead.email_normalized == values["email_normalized"],
+                        Lead.tenant_id == principal.tenant_id,
+                    )
                 )
             if lead is None and values["phone_normalized"]:
                 lead = db.scalar(
-                    select(Lead).where(Lead.phone_normalized == values["phone_normalized"])
+                    select(Lead).where(
+                        Lead.phone_normalized == values["phone_normalized"],
+                        Lead.tenant_id == principal.tenant_id,
+                    )
                 )
             if lead is not None:
                 duplicates += 1
                 continue
 
-            lead = Lead(**values, import_batch_id=batch.id)
+            lead_values = dict(values)
+            if lead_values["crm_created_at"]:
+                lead_values["crm_created_at"] = datetime.fromisoformat(
+                    lead_values["crm_created_at"]
+                )
+            if lead_values["monthly_account_value"]:
+                lead_values["monthly_account_value"] = Decimal(
+                    lead_values["monthly_account_value"]
+                )
+            lead = Lead(
+                **lead_values,
+                import_batch_id=batch.id,
+                tenant_id=principal.tenant_id,
+            )
             db.add(lead)
             db.flush()
             if lead.loss_reason and lead.loss_reason not in loss_reasons:
@@ -240,8 +288,15 @@ def confirm_import(import_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/imports")
-def list_imports(db: Session = Depends(get_db)):
-    batches = db.scalars(select(ImportBatch).order_by(ImportBatch.created_at.desc())).all()
+def list_imports(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("admin")),
+):
+    batches = db.scalars(
+        select(ImportBatch)
+        .where(ImportBatch.tenant_id == principal.tenant_id)
+        .order_by(ImportBatch.created_at.desc())
+    ).all()
     return [
         {
             "id": batch.id,
@@ -258,23 +313,52 @@ def list_imports(db: Session = Depends(get_db)):
 
 
 @router.get("/leads", response_model=list[LeadResponse])
-def list_leads(limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
+def list_leads(
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("auditor")),
+):
     if not 1 <= limit <= 500:
         raise HTTPException(422, "limit deve estar entre 1 e 500.")
-    return db.scalars(select(Lead).order_by(Lead.created_at.desc()).offset(offset).limit(limit)).all()
+    return db.scalars(
+        select(Lead)
+        .where(Lead.tenant_id == principal.tenant_id)
+        .order_by(Lead.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
 
 
 @router.get("/leads/{lead_id}", response_model=LeadResponse)
-def get_lead(lead_id: str, db: Session = Depends(get_db)):
-    lead = db.get(Lead, lead_id)
+def get_lead(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("auditor")),
+):
+    lead = db.scalar(
+        select(Lead).where(
+            Lead.id == lead_id,
+            Lead.tenant_id == principal.tenant_id,
+        )
+    )
     if lead is None:
         raise HTTPException(404, "Lead não encontrado.")
     return lead
 
 
 @router.get("/leads/{lead_id}/detail")
-def get_lead_detail(lead_id: str, db: Session = Depends(get_db)):
-    lead = db.get(Lead, lead_id)
+def get_lead_detail(
+    lead_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("auditor")),
+):
+    lead = db.scalar(
+        select(Lead).where(
+            Lead.id == lead_id,
+            Lead.tenant_id == principal.tenant_id,
+        )
+    )
     if lead is None:
         raise HTTPException(404, "Lead não encontrado.")
     history = db.scalars(
@@ -301,28 +385,57 @@ def get_lead_detail(lead_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/queues/summary", response_model=QueueSummary)
-def queue_summary(db: Session = Depends(get_db)):
+def queue_summary(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("gestor")),
+):
+    return _queue_summary(db, principal.tenant_id)
+
+
+def _queue_summary(db: Session, tenant_id: str) -> QueueSummary:
     return QueueSummary(
         audit_pending=db.scalar(
-            select(func.count()).select_from(AuditQueueItem).where(AuditQueueItem.status == "pending")
+            select(func.count())
+            .select_from(AuditQueueItem)
+            .join(Lead, Lead.id == AuditQueueItem.lead_id)
+            .where(
+                AuditQueueItem.status == "pending",
+                Lead.tenant_id == tenant_id,
+            )
         )
         or 0,
-        contact_drafts=db.scalar(select(func.count()).select_from(ContactQueueItem)) or 0,
+        contact_drafts=db.scalar(
+            select(func.count())
+            .select_from(ContactQueueItem)
+            .join(Lead, Lead.id == ContactQueueItem.lead_id)
+            .where(Lead.tenant_id == tenant_id)
+        )
+        or 0,
         contact_eligible=db.scalar(
             select(func.count())
             .select_from(ContactQueueItem)
-            .where(ContactQueueItem.eligible.is_(True))
+            .join(Lead, Lead.id == ContactQueueItem.lead_id)
+            .where(
+                ContactQueueItem.eligible.is_(True),
+                Lead.tenant_id == tenant_id,
+            )
         )
         or 0,
     )
 
 
 @router.get("/queues/audit")
-def audit_queue(db: Session = Depends(get_db)):
+def audit_queue(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("auditor")),
+):
     rows = db.execute(
         select(AuditQueueItem, Lead)
         .join(Lead, Lead.id == AuditQueueItem.lead_id)
-        .where(AuditQueueItem.status == "pending")
+        .where(
+            AuditQueueItem.status == "pending",
+            Lead.tenant_id == principal.tenant_id,
+        )
         .order_by(AuditQueueItem.created_at.desc())
         .limit(500)
     ).all()
@@ -330,10 +443,14 @@ def audit_queue(db: Session = Depends(get_db)):
 
 
 @router.get("/queues/contact")
-def contact_queue(db: Session = Depends(get_db)):
+def contact_queue(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("auditor")),
+):
     rows = db.execute(
         select(ContactQueueItem, Lead)
         .join(Lead, Lead.id == ContactQueueItem.lead_id)
+        .where(Lead.tenant_id == principal.tenant_id)
         .order_by(ContactQueueItem.created_at.desc())
         .limit(500)
     ).all()
@@ -350,31 +467,134 @@ def contact_queue(db: Session = Depends(get_db)):
 
 
 @router.get("/dashboard")
-def dashboard(db: Session = Depends(get_db)):
+def dashboard(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("gestor", "admin")),
+):
     classifications = dict(
         db.execute(
-            select(Lead.classification, func.count()).group_by(Lead.classification)
+            select(Lead.classification, func.count())
+            .where(Lead.tenant_id == principal.tenant_id)
+            .group_by(Lead.classification)
         ).all()
     )
+    recent_imports = db.scalars(
+        select(ImportBatch)
+        .where(ImportBatch.tenant_id == principal.tenant_id)
+        .order_by(ImportBatch.created_at.desc())
+        .limit(5)
+    ).all()
     return {
-        "total_leads": db.scalar(select(func.count()).select_from(Lead)) or 0,
+        "total_leads": db.scalar(
+            select(func.count()).select_from(Lead).where(Lead.tenant_id == principal.tenant_id)
+        )
+        or 0,
         "classifications": classifications,
-        "queues": queue_summary(db),
-        "recent_imports": list_imports(db)[:5],
+        "queues": _queue_summary(db, principal.tenant_id),
+        "recent_imports": [
+            {
+                "id": item.id,
+                "filename": item.filename,
+                "status": item.status,
+                "total_rows": item.total_rows,
+                "imported_rows": item.imported_rows,
+                "created_at": item.created_at,
+            }
+            for item in recent_imports
+        ],
     }
 
 
 @router.get("/reasons")
-def list_reasons(db: Session = Depends(get_db)):
+def list_reasons(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("auditor")),
+):
     return {
         "loss": [
             {"id": item.id, "name": item.name}
-            for item in db.scalars(select(LossReason).where(LossReason.active.is_(True))).all()
+            for item in db.scalars(
+                select(LossReason)
+                .join(Lead, Lead.loss_reason == LossReason.name)
+                .where(
+                    LossReason.active.is_(True),
+                    Lead.tenant_id == principal.tenant_id,
+                )
+                .distinct()
+            ).all()
         ],
         "disqualification": [
             {"id": item.id, "name": item.name}
             for item in db.scalars(
-                select(DisqualificationReason).where(DisqualificationReason.active.is_(True))
+                select(DisqualificationReason)
+                .join(Lead, Lead.disqualification_reason == DisqualificationReason.name)
+                .where(
+                    DisqualificationReason.active.is_(True),
+                    Lead.tenant_id == principal.tenant_id,
+                )
+                .distinct()
             ).all()
         ],
+    }
+
+
+@router.get("/admin/users")
+def list_admin_users(
+    page_token: str | None = None,
+    principal: Principal = Depends(require_roles("admin")),
+):
+    app = get_firebase_admin_app()
+    try:
+        page = firebase_auth.list_users(
+            app=app,
+            max_results=1000,
+            page_token=page_token,
+        )
+    except firebase_exceptions.FirebaseError as exc:
+        logger.exception("Firebase user listing failed.")
+        raise HTTPException(
+            503, "Firebase user management is temporarily unavailable."
+        ) from exc
+    users = [
+        {
+            "uid": user.uid,
+            "email": user.email,
+            "display_name": user.display_name,
+            "role": (user.custom_claims or {}).get("role"),
+        }
+        for user in page.users
+        if (user.custom_claims or {}).get("tenant_id") == principal.tenant_id
+    ]
+    return {"users": users, "next_page_token": page.next_page_token}
+
+
+@router.put("/admin/users/{uid}/role")
+def update_user_role(
+    uid: str,
+    request: AdminUserRoleUpdate,
+    principal: Principal = Depends(require_roles("admin")),
+):
+    if uid == principal.uid:
+        raise HTTPException(409, "Administrators cannot change their own access role.")
+    app = get_firebase_admin_app()
+    try:
+        user = firebase_auth.get_user(uid, app=app)
+        claims = dict(user.custom_claims or {})
+        existing_tenant = claims.get("tenant_id")
+        if existing_tenant and existing_tenant != principal.tenant_id:
+            raise HTTPException(404, "User not found in this organization.")
+        claims.update(role=request.role, tenant_id=principal.tenant_id)
+        firebase_auth.set_custom_user_claims(uid, claims, app=app)
+    except firebase_exceptions.FirebaseError as exc:
+        if isinstance(exc, firebase_auth.UserNotFoundError):
+            raise HTTPException(404, "User not found.") from exc
+        logger.exception("Firebase user role update failed.")
+        raise HTTPException(
+            503, "Firebase user management is temporarily unavailable."
+        ) from exc
+    return {
+        "uid": uid,
+        "role": request.role,
+        "tenant_id": principal.tenant_id,
+        "token_refresh_required": True,
     }

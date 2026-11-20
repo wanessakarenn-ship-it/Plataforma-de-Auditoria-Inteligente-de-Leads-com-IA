@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "BC Lead Intelligence",
+  title: "Lead Intelligence AI",
   description: "Auditoria inteligente e governança do ciclo de vida de leads.",
 };
 

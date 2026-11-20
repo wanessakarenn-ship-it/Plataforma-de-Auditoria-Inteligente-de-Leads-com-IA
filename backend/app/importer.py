@@ -28,9 +28,9 @@ FIELD_ALIASES = {
     "email": {"email", "email address", "e mail"},
     "phone": {"phone", "mobile", "mobile phone", "telephone", "telefone", "celular"},
     "status": {"status", "lead status", "leadstatus", "lead status name", "status do lead"},
-    "phase": {"phase", "stage", "stage name", "lead phase", "funnel stage"},
+    "phase": {"phase", "stage", "stage name", "lead phase", "funnel stage", "fase"},
     "source": {"lead source", "source", "leadsource", "origem do lead"},
-    "loss_reason": {"loss reason", "closed lost reason", "motivo de perda"},
+    "loss_reason": {"loss reason", "closed lost reason", "motivo de perda", "motivo da perda"},
     "disqualification_reason": {
         "reason description",
         "descricao do motivo",
@@ -77,15 +77,6 @@ def _cell_string(value: Any) -> str:
     return "" if value is None else str(value).strip()
 
 
-def _guess_delimiter(text: str) -> str:
-    sample = "\n".join(text.splitlines()[:10])
-    try:
-        return csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
-    except csv.Error:
-        first = sample.splitlines()[0] if sample else ""
-        return ";" if first.count(";") > first.count(",") else ","
-
-
 def parse_file(filename: str, content: bytes) -> ParsedSheet:
     suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     if suffix == "csv":
@@ -93,7 +84,15 @@ def parse_file(filename: str, content: bytes) -> ParsedSheet:
             text = content.decode("utf-8-sig")
         except UnicodeDecodeError:
             text = content.decode("cp1252")
-        rows = list(csv.reader(io.StringIO(text), delimiter=_guess_delimiter(text)))
+        candidates = [
+            list(csv.reader(io.StringIO(text), delimiter=delimiter))
+            for delimiter in (",", ";", "\t", "|")
+        ]
+
+        def candidate_score(rows: list[list[str]]) -> int:
+            return max((_score(_mapping_for(row)) for row in rows[:30]), default=0)
+
+        rows = max(candidates, key=candidate_score)
     elif suffix in {"xlsx", "xlsm"}:
         workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         sheet = workbook.active
@@ -180,7 +179,10 @@ def _parse_money(value: str) -> Decimal:
         text = text.replace(thousands_separator, "")
         text = text.replace(decimal_separator, ".")
     elif "," in text:
-        text = text.replace(".", "").replace(",", ".")
+        tail = text.rsplit(",", 1)[-1]
+        text = text.replace(",", "") if len(tail) == 3 else text.replace(".", "").replace(",", ".")
+    elif "." in text and len(text.rsplit(".", 1)[-1]) == 3:
+        text = text.replace(".", "")
     elif text.count(".") > 1:
         head, tail = text.rsplit(".", 1)
         text = head.replace(".", "") + "." + tail

@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     JSON,
@@ -27,7 +28,9 @@ def utc_now() -> datetime:
 
 
 def message_retention_deadline() -> datetime:
-    return utc_now() + timedelta(days=90)
+    from backend.app.config import get_settings
+
+    return utc_now() + timedelta(days=get_settings().message_retention_days)
 
 
 class Base(DeclarativeBase):
@@ -45,6 +48,7 @@ class ImportBatch(Base, Timestamped):
     __tablename__ = "import_batches"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     filename: Mapped[str] = mapped_column(String(255))
     file_type: Mapped[str] = mapped_column(String(10))
     status: Mapped[str] = mapped_column(String(24), default="preview")
@@ -78,13 +82,15 @@ class DisqualificationReason(Base, Timestamped):
 class Lead(Base, Timestamped):
     __tablename__ = "leads"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "external_id", name="uq_leads_tenant_external_id"),
         Index("ix_leads_email_normalized", "email_normalized"),
         Index("ix_leads_phone_normalized", "phone_normalized"),
         Index("ix_leads_classification", "classification"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    external_id: Mapped[str | None] = mapped_column(String(160), unique=True, nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     company: Mapped[str | None] = mapped_column(String(240), nullable=True)
@@ -180,7 +186,7 @@ class Message(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    retention_until: Mapped[datetime] = mapped_column(
+    retention_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=message_retention_deadline
     )
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -194,12 +200,17 @@ class MessageEvent(Base):
     __tablename__ = "message_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    message_id: Mapped[str] = mapped_column(ForeignKey("messages.id"), index=True)
+    message_id: Mapped[str] = mapped_column(
+        ForeignKey("messages.id", name="fk_message_events_message_id"), index=True
+    )
     event_type: Mapped[str] = mapped_column(String(24))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     source: Mapped[str] = mapped_column(String(120))
     before_content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     after_content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_id_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    conversation_id_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tombstone_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     message: Mapped[Message] = relationship(back_populates="events")
 
 
@@ -224,7 +235,12 @@ class Audit(Base, Timestamped):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     request_hash: Mapped[str] = mapped_column(String(64), default="")
-    reprocess_of_id: Mapped[str | None] = mapped_column(ForeignKey("audits.id"), nullable=True)
+    reprocess_of_id: Mapped[str | None] = mapped_column(
+        ForeignKey("audits.id", name="fk_audits_reprocess_of_id"), nullable=True, index=True
+    )
+    review_status: Mapped[str] = mapped_column(String(24), default="pending")
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     result_json: Mapped[dict] = mapped_column(JSON, default=dict)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -242,7 +258,9 @@ class Evidence(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     audit_id: Mapped[str] = mapped_column(ForeignKey("audits.id"), index=True)
-    message_id: Mapped[str | None] = mapped_column(ForeignKey("messages.id"), nullable=True)
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("messages.id", name="fk_evidence_message_id"), nullable=True, index=True
+    )
     source_type: Mapped[str] = mapped_column(String(40))
     source_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     excerpt: Mapped[str] = mapped_column(Text)
@@ -297,3 +315,152 @@ class ProcessingLog(Base):
     message: Mapped[str] = mapped_column(Text)
     details_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AdminActionLog(Base):
+    __tablename__ = "admin_action_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    actor_uid: Mapped[str] = mapped_column(String(128))
+    actor_role: Mapped[str] = mapped_column(String(24))
+    tenant_id: Mapped[str] = mapped_column(String(128), index=True)
+    method: Mapped[str] = mapped_column(String(8))
+    route: Mapped[str] = mapped_column(String(240))
+    resource_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(24), default="authorized")
+    status_code: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AIAgent(Base, Timestamped):
+    __tablename__ = "ai_agents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "template_key", name="uq_ai_agents_tenant_template"),
+        Index("ix_ai_agents_tenant_active", "tenant_id", "is_active"),
+        Index("uq_ai_agents_tenant_id", "tenant_id", "id", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    template_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    name: Mapped[str] = mapped_column(String(120))
+    purpose: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text)
+    process_role: Mapped[str] = mapped_column(String(120))
+    model_id: Mapped[str] = mapped_column(String(64), default="local-simulated")
+    instructions: Mapped[str] = mapped_column(Text)
+    system_prompt: Mapped[str] = mapped_column(Text)
+    decision_criteria: Mapped[str] = mapped_column(Text)
+    safety_rules: Mapped[str] = mapped_column(Text)
+    human_handoff: Mapped[str] = mapped_column(Text)
+    temperature: Mapped[float] = mapped_column(Float, default=0.2)
+    max_output_tokens: Mapped[int] = mapped_column(Integer, default=512)
+    max_cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0"))
+    publication_state: Mapped[str] = mapped_column(String(16), default="draft")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    knowledge_requires_approval: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1"
+    )
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_by_uid: Mapped[str] = mapped_column(String(128))
+    approved_by_uid: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    versions: Mapped[list["AIAgentVersion"]] = relationship(
+        back_populates="agent", cascade="all, delete-orphan"
+    )
+
+
+class KnowledgeContent(Base, Timestamped):
+    __tablename__ = "knowledge_contents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_knowledge_contents_tenant_id"),
+        Index("ix_knowledge_contents_tenant_status", "tenant_id", "status"),
+        Index("ix_knowledge_contents_tenant_category", "tenant_id", "category"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    category: Mapped[str] = mapped_column(String(32))
+    body: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(String(300))
+    source_type: Mapped[str] = mapped_column(String(16), default="text")
+    source_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_by_uid: Mapped[str] = mapped_column(String(128))
+    approved_by_uid: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    versions: Mapped[list["KnowledgeContentVersion"]] = relationship(
+        back_populates="content", cascade="all, delete-orphan"
+    )
+
+
+class KnowledgeContentVersion(Base):
+    __tablename__ = "knowledge_content_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "content_id"],
+            ["knowledge_contents.tenant_id", "knowledge_contents.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("tenant_id", "content_id", "version_number", name="uq_knowledge_versions"),
+        Index("ix_knowledge_versions_tenant_id", "tenant_id"),
+        Index("ix_knowledge_versions_tenant_content", "tenant_id", "content_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    content_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer)
+    snapshot_json: Mapped[dict] = mapped_column(JSON)
+    created_by_uid: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    content: Mapped[KnowledgeContent] = relationship(back_populates="versions")
+
+
+class KnowledgeAgentLink(Base):
+    __tablename__ = "knowledge_agent_links"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "agent_id"],
+            ["ai_agents.tenant_id", "ai_agents.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "content_id"],
+            ["knowledge_contents.tenant_id", "knowledge_contents.id"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_knowledge_agent_links_agent", "tenant_id", "agent_id"),
+        Index("ix_knowledge_agent_links_content", "tenant_id", "content_id"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    content_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_by_uid: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AIAgentVersion(Base):
+    __tablename__ = "ai_agent_versions"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "version_number", name="uq_ai_agent_versions_number"),
+        Index("ix_ai_agent_versions_tenant_agent", "tenant_id", "agent_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_agents.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    snapshot_json: Mapped[dict] = mapped_column(JSON)
+    created_by_uid: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    agent: Mapped[AIAgent] = relationship(back_populates="versions")

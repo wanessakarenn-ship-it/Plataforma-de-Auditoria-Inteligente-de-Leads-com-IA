@@ -37,3 +37,34 @@ def test_excel_header_detection_and_full_name_split():
     assert row["values"]["first_name"] == "Dora"
     assert row["values"]["last_name"] == "Monteiro"
     assert row["values"]["classification"] == "hand_raised"
+
+
+def test_salesforce_november_export_maps_localized_columns_and_types():
+    content = (
+        "Salesforce report export; November 2026\n"
+        "Lead Intelligence AI; informational row\n"
+        "Data de criação;Fase;Status do lead;Campanha BC;Origem do Lead;"
+        "Sobrenome;Email;Celular;Valor Mensal da Conta;Descrição do Motivo;"
+        "Motivo da perda;Descrição Motivo\n"
+        "2026-11-18T09:30:00;Perdido;Qualificado;BC - Sintético;Formulário;"
+        "Synthetic-Lead;lead-001@example.invalid;+1 202 555 0101;R$ 1.234,56;"
+        "Justificativa sintética;Orçamento;Detalhe sintético\n"
+    ).encode()
+    parsed = parse_file("salesforce-november-2026.csv", content)
+    assert parsed.mapping["crm_created_at"] == "Data de criação"
+    assert parsed.mapping["monthly_account_value"] == "Valor Mensal da Conta"
+    assert parsed.mapping["phone"] == "Celular"
+    assert parsed.mapping["disqualification_reason"] == "Descrição do Motivo"
+    assert parsed.mapping["loss_reason_description"] == "Descrição Motivo"
+
+    row = validate_rows(parsed.rows, parsed.mapping)[0]
+    assert row["values"]["last_name"] == "Synthetic-Lead"
+    assert row["values"]["crm_created_at"] == "2026-11-18T09:30:00"
+    assert row["values"]["monthly_account_value"] == "1234.56"
+    assert row["values"]["campaign"] == "BC - Sintético"
+    assert row["values"]["source"] == "Formulário"
+    assert row["values"]["classification"] == "qualified_lost"
+    assert row["values"]["loss_reason"] == "Orçamento"
+    assert row["values"]["disqualification_reason"] == "Justificativa sintética"
+    assert row["values"]["loss_reason_description"] == "Detalhe sintético"
+    assert not row["errors"]

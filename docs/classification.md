@@ -14,3 +14,13 @@
 | Revisão (`unknown`) | Valor não reconhecido |
 
 As regras são heurísticas configuráveis, não uma afirmação sobre os picklists da organização. O importador preserva os valores de origem. Valide valores e sinônimos com a exportação real, sem colocar dados pessoais em fixtures.
+
+## Resultado de auditoria baseado em evidências
+
+O resultado da auditoria é distinto da classificação comercial do lead:
+
+- **Confirmado** e **Divergente** só são aceitos com ao menos uma citação literal que corresponda a uma mensagem autorizada e ainda retida.
+- **Inconclusivo** significa que o contexto não sustenta uma conclusão; ausência de correspondência não comprova divergência.
+- **Não auditável** é usado sem motivo original ou histórico autorizado disponível.
+
+Todas as execuções requerem revisão humana. O modo simulado apenas verifica correspondência literal e não usa IA; o modo Vertex permanece desativado até configuração explícita e aprovação.
