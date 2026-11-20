@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as SQLAlchemySession
 
 from backend.app.api.audits import router as audit_router
+from backend.app.api.karen import router as karen_router
 from backend.app.api.knowledge import router as knowledge_router
 from backend.app.api.studio import router as studio_router
 from backend.app.api.routes import router
@@ -62,6 +63,7 @@ async def finalize_authorized_action_log(request, call_next):
 app.include_router(router, prefix="/api")
 app.include_router(audit_router, prefix="/api")
 app.include_router(studio_router, prefix="/api")
+app.include_router(karen_router, prefix="/api")
 app.include_router(knowledge_router, prefix="/api")
 
 __all__ = ["app", "VertexAuditNotConfigured"]

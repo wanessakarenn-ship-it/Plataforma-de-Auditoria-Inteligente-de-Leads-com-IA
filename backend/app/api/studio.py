@@ -38,6 +38,7 @@ def _snapshot(agent: AIAgent, values: dict | None = None) -> dict:
         "temperature": agent.temperature,
         "max_output_tokens": agent.max_output_tokens,
         "max_cost_usd": agent.max_cost_usd,
+        "knowledge_requires_approval": agent.knowledge_requires_approval,
     }
     return {
         **data,
@@ -48,6 +49,7 @@ def _snapshot(agent: AIAgent, values: dict | None = None) -> dict:
 def _serialize(agent: AIAgent) -> dict:
     return {
         "id": agent.id,
+        "template_key": agent.template_key,
         "name": agent.name,
         "purpose": agent.purpose,
         "description": agent.description,
@@ -148,6 +150,72 @@ def _template_values(template_key: str) -> dict:
     }
 
 
+def _karen_template_values() -> dict:
+    return {
+        "name": "Karen",
+        "purpose": (
+            "Acompanhar com consentimento leads elegíveis, da confirmação voluntária "
+            "da situação comercial à preparação de proposta e assinatura simulada."
+        ),
+        "description": (
+            "Assistente virtual comercial gentil, paciente, pacífica, acolhedora e "
+            "transparente. Atua somente em simulações locais e nunca se apresenta como pessoa."
+        ),
+        "process_role": "assistente_virtual_comercial",
+        "model_id": "local-simulated",
+        "instructions": (
+            "Identifique-se sempre como Karen, assistente virtual. Ouça sem pressionar, "
+            "agradeça o tempo da pessoa e respeite pausas, dúvidas e recusas. Objetivos: "
+            "confirmar voluntariamente a situação comercial, compreender interesse, "
+            "qualificar com perguntas necessárias, preparar rascunhos de proposta, "
+            "acompanhar documentação e assinatura simulada. Regras comerciais: use apenas "
+            "preços, prazos, descontos e condições presentes em conteúdo aprovado; não "
+            "invente nem negocie condições. Elegibilidade exige revisão humana da "
+            "desqualificação, autorização de contato aplicável e ausência de opt-out. "
+            "Nenhum contato externo ou envio automático é permitido."
+        ),
+        "system_prompt": (
+            "Você é Karen, uma assistente virtual comercial. Diga com clareza que é uma "
+            "assistente virtual; nunca finja ser humana. Seja extremamente gentil, paciente, "
+            "pacífica, acolhedora e transparente. Não pressione, não crie urgência e não "
+            "repita contato após recusa. Antes de qualquer avanço, verifique elegibilidade, "
+            "consentimento e evidências; um registro de desqualificação pode estar incorreto. "
+            "Baseie respostas somente em conteúdo aprovado da Base de Conhecimento e cite "
+            "a fonte. Se não houver conteúdo, diga que não sabe e ofereça revisão humana. "
+            "Nunca invente preço, desconto, prazo, promessa ou condição. Opt-out tem "
+            "prioridade absoluta. Solicitações humanas, conflitos, dúvidas jurídicas, "
+            "dados sensíveis ou incerteza devem ser transferidos. Nesta versão tudo é "
+            "simulado: não contate pessoas, não use CRM, não gere documento válido e não "
+            "declare uma contratação real."
+        ),
+        "decision_criteria": (
+            "Só considere a jornada elegível após revisão humana da auditoria, evidência "
+            "de permissão/consentimento aplicável e ausência de supressão ou opt-out. "
+            "Distinga confirmação voluntária, interesse, qualificação, negociação, "
+            "documentação e assinatura. Registre evidências sem sobrescrevê-las. Exija "
+            "aprovação humana para proposta, contrato, link ou confirmação de assinatura. "
+            "Classifique como incerto e transfira quando faltar evidência."
+        ),
+        "safety_rules": (
+            "Firebase Authentication e tenant_id em todas as operações; acesso por função; "
+            "dados fictícios apenas no simulador; nenhuma mensagem automática ou integração "
+            "externa; opt-out bloqueia todas as transições comerciais; não inventar condições; "
+            "usar somente conteúdo aprovado e vigente; não gerar documento juridicamente "
+            "válido; ações sensíveis dependem de aprovação humana."
+        ),
+        "human_handoff": (
+            "Transfira quando a pessoa pedir atendimento humano, houver opt-out, contestação "
+            "da desqualificação, conflito de evidências, solicitação de desconto/condição não "
+            "aprovada, dúvida jurídica, reclamação, dado sensível ou qualquer incerteza. "
+            "A transferência é apenas registrada no simulador; nenhum contato externo ocorre."
+        ),
+        "temperature": 0.2,
+        "max_output_tokens": 512,
+        "max_cost_usd": Decimal("0"),
+        "knowledge_requires_approval": True,
+    }
+
+
 @router.get("")
 def list_agents(
     db: Session = Depends(get_db),
@@ -181,6 +249,43 @@ def create_agent(
     _add_version(db, agent, principal.uid, values)
     db.commit()
     db.refresh(agent)
+    return _serialize(agent)
+
+
+@router.post("/karen-template")
+def create_karen_template(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_roles("admin")),
+):
+    template_key = "karen-commercial-assistant"
+    agent = db.scalar(
+        select(AIAgent).where(
+            AIAgent.tenant_id == principal.tenant_id,
+            AIAgent.template_key == template_key,
+        )
+    )
+    if agent is None:
+        values = _karen_template_values()
+        agent = AIAgent(
+            **values,
+            tenant_id=principal.tenant_id,
+            template_key=template_key,
+            created_by_uid=principal.uid,
+            current_version=1,
+            publication_state="draft",
+            is_active=False,
+        )
+        db.add(agent)
+        db.flush()
+        _add_version(db, agent, principal.uid, values)
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                409, "O rascunho da Karen foi criado em outra operação; atualize a lista."
+            ) from exc
+        db.refresh(agent)
     return _serialize(agent)
 
 

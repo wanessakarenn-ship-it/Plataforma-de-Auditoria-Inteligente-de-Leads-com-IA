@@ -1,8 +1,19 @@
 from datetime import datetime
 from decimal import Decimal
+import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def _validate_synthetic_text(value: str | None) -> str | None:
+    if value and re.search(
+        r"(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})|(?:\+?\d[\d\s().-]{7,}\d)",
+        value,
+        re.IGNORECASE,
+    ):
+        raise ValueError("Use somente texto fictício; e-mail e telefone não são aceitos.")
+    return value
 
 
 class LeadResponse(BaseModel):
@@ -103,6 +114,81 @@ class AIAgentPublicationAction(BaseModel):
 
 class AIAgentActivationUpdate(BaseModel):
     is_active: bool
+
+
+KarenScenarioKey = Literal[
+    "no_interest",
+    "incorrect_disqualification",
+    "resume_negotiation",
+    "proposal_questions",
+    "unauthorized_discount",
+    "human_service",
+    "contact_refusal",
+    "accepts_proposal",
+    "awaiting_signature",
+    "contract_signed",
+]
+
+KarenAction = Literal[
+    "confirm_contact",
+    "confirm_commercial_status",
+    "confirm_interest",
+    "start_qualification",
+    "prepare_proposal",
+    "approve_proposal",
+    "start_negotiation",
+    "request_documents",
+    "prepare_contract",
+    "create_contract_link",
+    "confirm_contract_signed",
+    "start_post_sale",
+    "record_no_interest",
+    "transfer_human",
+    "opt_out",
+    "block",
+    "suspend",
+    "resume",
+]
+
+
+class KarenSimulationCreateRequest(BaseModel):
+    scenario_key: KarenScenarioKey
+
+
+class KarenSimulationTurnRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("message")
+    @classmethod
+    def reject_personal_contact_data(cls, value: str) -> str:
+        return _validate_synthetic_text(value) or ""
+
+
+class KarenSimulationActionRequest(BaseModel):
+    action: KarenAction
+    note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("note")
+    @classmethod
+    def reject_personal_contact_data(cls, value: str | None) -> str | None:
+        return _validate_synthetic_text(value)
+
+
+class KarenSimulationApprovalRequest(BaseModel):
+    action: Literal[
+        "confirm_contact",
+        "prepare_proposal",
+        "approve_proposal",
+        "prepare_contract",
+        "create_contract_link",
+        "confirm_contract_signed",
+    ]
+    note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("note")
+    @classmethod
+    def reject_personal_contact_data(cls, value: str | None) -> str | None:
+        return _validate_synthetic_text(value)
 
 
 KnowledgeCategory = Literal[

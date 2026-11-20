@@ -11,6 +11,7 @@ import {
   type AppRole,
 } from "../lib/firebase";
 import AIStudio from "../components/ai-studio";
+import KarenSimulator from "../components/karen-simulator";
 import KnowledgeBase from "../components/knowledge-base";
 
 type Lead = {
@@ -145,7 +146,8 @@ type Section =
   | "loss"
   | "disqualification"
   | "ai-studio"
-  | "knowledge";
+  | "knowledge"
+  | "karen";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
@@ -164,6 +166,7 @@ const navigation: Array<{ id: Section; label: string; icon: string; group: strin
   },
   { id: "ai-studio", label: "Estúdio de IA", icon: "✳", group: "Administração" },
   { id: "knowledge", label: "Base de Conhecimento", icon: "▤", group: "Administração" },
+  { id: "karen", label: "Karen · Simulador", icon: "♡", group: "Gestão comercial" },
 ];
 
 const classLabels: Record<string, string> = {
@@ -446,9 +449,9 @@ export default function Home() {
 
   const allowedSections =
     role === "admin"
-      ? ["overview", "imports", "ai-studio", "knowledge"]
+      ? ["overview", "imports", "ai-studio", "knowledge", "karen"]
       : role === "gestor"
-        ? ["overview"]
+        ? ["overview", "karen"]
         : ["leads", "audit", "contact", "loss", "disqualification"];
   const visibleNavigation = navigation.filter((item) => allowedSections.includes(item.id));
   const roleLabels: Record<AppRole, string> = {
@@ -586,7 +589,7 @@ export default function Home() {
           <div className="page-heading">
             <div>
               <div className="eyebrow">
-                LEAD INTELLIGENCE · {section === "ai-studio" || section === "knowledge" ? "SPRINT 03" : "SPRINT 02"}
+                LEAD INTELLIGENCE · {section === "ai-studio" || section === "knowledge" || section === "karen" ? "SPRINT 03" : "SPRINT 02"}
               </div>
               <h1>{section === "overview" ? "Visão geral" : pageTitle}</h1>
               <p>
@@ -598,6 +601,8 @@ export default function Home() {
                       ? "Cadastre e versione agentes por organização; publicação exige aprovação humana."
                     : section === "knowledge"
                       ? "Gerencie fontes versionadas e pré-visualize referências recuperadas localmente."
+                    : section === "karen"
+                      ? "Configure a assistente virtual e simule jornadas comerciais com dados fictícios."
                     : "Acompanhe e revise registros. Ações externas permanecem desativadas."}
               </p>
             </div>
@@ -781,6 +786,9 @@ export default function Home() {
           )}
           {section === "ai-studio" && role === "admin" && <AIStudio />}
           {section === "knowledge" && role === "admin" && <KnowledgeBase />}
+          {section === "karen" && (role === "admin" || role === "gestor") && (
+            <KarenSimulator onOpenStudio={role === "admin" ? () => setSection("ai-studio") : undefined} />
+          )}
         </div>
       </main>
     </div>
