@@ -36,8 +36,28 @@ nem alterado nesta etapa; precisa ser confirmado antes de qualquer provisionamen
   conservadora com zero instâncias mínimas e limite de três instâncias.
 - Não há valores de `frontend/.env.local` ou credenciais copiados para esses arquivos.
 
-Antes de qualquer rollout, configurar no App Hosting, disponíveis em **BUILD** e
-**RUNTIME**, as quatro variáveis Firebase Web já existentes localmente, além de:
+### Prévia frontend-only
+
+Para a prévia solicitada, `frontend/apphosting.yaml` define
+`NEXT_PUBLIC_APP_ENV=preview`. Não configurar `NEXT_PUBLIC_API_URL`: a aplicação
+bloqueia chamadas ao FastAPI nesse modo, mantém a autenticação Firebase e exibe estados
+indisponíveis sem fabricar dados ou sucesso. O simulador Karen mostra somente os nomes
+dos cenários sintéticos; registrar uma conversa continua dependendo da API.
+
+Na consulta somente leitura do Firebase Authentication, Email/Senha estava ativado e
+Google não aparecia como provedor ativo. A tela de login da prévia deixa Google
+indisponível; nenhum provedor ou usuário foi alterado.
+
+No App Hosting, as variáveis públicas da aplicação Web devem ser configuradas a partir
+da Firebase Web App existente: `NEXT_PUBLIC_FIREBASE_API_KEY`,
+`NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID` e
+`NEXT_PUBLIC_FIREBASE_APP_ID`. Não transferir arquivos `.env.local` inteiros nem
+adicionar tokens, senhas ou credenciais privadas ao frontend. O domínio gerado para a
+prévia precisa estar autorizado no Firebase Authentication para permitir login.
+
+Para rollouts integrados que incluam a API, configurar no App Hosting, disponíveis em
+**BUILD** e **RUNTIME**, as quatro variáveis Firebase Web já existentes localmente,
+além de:
 
 - `NEXT_PUBLIC_API_URL=https://<URL-Cloud-Run>/api`
 - `NEXT_PUBLIC_FIREBASE_PROJECT_ID=prime-amulet-439718-e3`

@@ -4,3 +4,9 @@ runConfig:
   concurrency: 80
   cpu: 1
   memoryMiB: 512
+env:
+  - variable: NEXT_PUBLIC_APP_ENV
+    value: preview
+    availability:
+      - BUILD
+      - RUNTIME
