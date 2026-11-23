@@ -1,3 +1,15 @@
+import os
+
+os.environ.update(
+    {
+        "APP_ENV": "test",
+        "CLOUD_SQL_IAM_AUTH": "false",
+        "DATABASE_URL": "sqlite://",
+        "VERTEX_AI_ENABLED": "false",
+        "VERTEX_AI_APPROVED": "false",
+    }
+)
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
