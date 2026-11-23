@@ -151,7 +151,7 @@ type Section =
   | "knowledge"
   | "karen";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "";
 
 const navigation: Array<{ id: Section; label: string; icon: string; group: string }> = [
   { id: "overview", label: "Visão geral", icon: "◫", group: "Workspace" },

@@ -37,12 +37,27 @@ export function getBackendUnavailableReason() {
     return "NEXT_PUBLIC_API_URL não contém uma URL válida.";
   }
 
+  const isLocalHost = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsedUrl.hostname);
+  const allowsLocalHttp =
+    process.env.NODE_ENV === "development" &&
+    parsedUrl.protocol === "http:" &&
+    isLocalHost;
+  if (parsedUrl.protocol !== "https:" && !allowsLocalHttp) {
+    return "A API deve usar HTTPS fora do desenvolvimento local.";
+  }
+  if (parsedUrl.username || parsedUrl.password || parsedUrl.search || parsedUrl.hash) {
+    return "A URL da API não pode conter credenciais, parâmetros ou fragmentos.";
+  }
+  if (parsedUrl.pathname.replace(/\/+$/, "") !== "/api") {
+    return "NEXT_PUBLIC_API_URL deve apontar para a raiz /api do serviço.";
+  }
+
   if (
     process.env.NODE_ENV === "production" &&
-    (parsedUrl.protocol !== "https:" ||
-      parsedUrl.hostname === "localhost" ||
+    (parsedUrl.hostname === "localhost" ||
       parsedUrl.hostname === "127.0.0.1" ||
-      parsedUrl.hostname === "::1")
+      parsedUrl.hostname === "::1" ||
+      parsedUrl.hostname === "[::1]")
   ) {
     return "A URL da API de produção deve usar HTTPS e não pode apontar para localhost.";
   }
