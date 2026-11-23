@@ -2,7 +2,9 @@ from io import BytesIO
 
 from openpyxl import Workbook
 
-from backend.app.importer import parse_file, validate_rows
+import pytest
+
+from backend.app.importer import ImportLimitExceeded, parse_file, validate_rows
 
 
 def test_csv_header_detection_mapping_validation_and_deduplication():
@@ -68,3 +70,33 @@ def test_salesforce_november_export_maps_localized_columns_and_types():
     assert row["values"]["disqualification_reason"] == "Justificativa sintética"
     assert row["values"]["loss_reason_description"] == "Detalhe sintético"
     assert not row["errors"]
+
+
+def test_csv_row_limit_is_enforced_while_iterating():
+    content = b"Id,Email\n1,a@example.test\n2,b@example.test\n"
+    with pytest.raises(ImportLimitExceeded, match="limite de linhas"):
+        parse_file("bounded.csv", content, max_rows=1)
+
+
+def test_xlsx_expansion_limit_is_checked_before_workbook_parsing():
+    workbook = Workbook()
+    workbook.active.append(["Id", "Email"])
+    output = BytesIO()
+    workbook.save(output)
+
+    with pytest.raises(ImportLimitExceeded, match="limite de expansão"):
+        parse_file(
+            "bounded.xlsx",
+            output.getvalue(),
+            max_uncompressed_bytes=1,
+        )
+
+
+def test_xlsx_rejects_excessive_declared_dimensions_before_iterating():
+    workbook = Workbook()
+    workbook.active["ZZ1000000"] = "synthetic"
+    output = BytesIO()
+    workbook.save(output)
+
+    with pytest.raises(ImportLimitExceeded, match="limite de (linhas|colunas)"):
+        parse_file("oversized-dimensions.xlsx", output.getvalue(), max_rows=10)
