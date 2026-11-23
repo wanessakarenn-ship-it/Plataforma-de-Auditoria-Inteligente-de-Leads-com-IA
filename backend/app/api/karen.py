@@ -342,6 +342,11 @@ def simulate_turn(
     principal: Principal = Depends(require_roles("admin", "gestor")),
 ):
     simulation = _get_simulation(db, simulation_id, principal.tenant_id)
+    if simulation.state == "suspended":
+        raise HTTPException(
+            409,
+            "A jornada está suspensa; um usuário autorizado precisa retomá-la.",
+        )
     if simulation.state in {"opt_out", "no_interest", "blocked"}:
         raise HTTPException(409, "A jornada foi encerrada ou bloqueada e não recebe novos turnos.")
     if simulation.state == "human_transfer":

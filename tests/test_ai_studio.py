@@ -519,10 +519,36 @@ def test_karen_state_machine_rejects_invalid_transitions_and_resumes_auditably(
     suspended = firebase_api_client.post(
         action_path, headers=headers, json={"action": "suspend"}
     )
+    assert suspended.json()["state"] == "suspended"
+
+    suspended_event_ids = [event["id"] for event in suspended.json()["events"]]
+    blocked_turn = firebase_api_client.post(
+        f"/api/karen/simulations/{simulation_id}/turns",
+        headers=headers,
+        json={"message": "Mensagem sintética durante suspensão"},
+    )
+    assert blocked_turn.status_code == 409
+    after_blocked_turn = firebase_api_client.get(
+        f"/api/karen/simulations/{simulation_id}", headers=headers
+    ).json()
+    assert after_blocked_turn["state"] == "suspended"
+    assert [event["id"] for event in after_blocked_turn["events"]] == suspended_event_ids
+
+    unauthorized_resume = firebase_api_client.post(
+        action_path,
+        headers=_headers("auditor-a"),
+        json={"action": "resume"},
+    )
+    assert unauthorized_resume.status_code == 403
+    after_unauthorized_resume = firebase_api_client.get(
+        f"/api/karen/simulations/{simulation_id}", headers=headers
+    ).json()
+    assert after_unauthorized_resume["state"] == "suspended"
+    assert [event["id"] for event in after_unauthorized_resume["events"]] == suspended_event_ids
+
     resumed = firebase_api_client.post(
         action_path, headers=headers, json={"action": "resume"}
     )
-    assert suspended.json()["state"] == "suspended"
     assert resumed.json()["state"] == "commercial_confirmation"
     transitions = [
         (event["from_state"], event["to_state"])
