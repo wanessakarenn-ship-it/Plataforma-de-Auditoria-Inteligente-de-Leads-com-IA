@@ -2,9 +2,12 @@ import csv
 import io
 import re
 import unicodedata
+import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from itertools import chain, islice
 from typing import Any
 
 from openpyxl import load_workbook
@@ -42,6 +45,13 @@ FIELD_ALIASES = {
 }
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+MAX_XLSX_ARCHIVE_ENTRIES = 10_000
+MAX_IMPORT_COLUMNS = 256
+
+
+class ImportLimitExceeded(ValueError):
+    pass
 
 
 @dataclass
@@ -77,44 +87,33 @@ def _cell_string(value: Any) -> str:
     return "" if value is None else str(value).strip()
 
 
-def parse_file(filename: str, content: bytes) -> ParsedSheet:
-    suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    if suffix == "csv":
-        try:
-            text = content.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            text = content.decode("cp1252")
-        candidates = [
-            list(csv.reader(io.StringIO(text), delimiter=delimiter))
-            for delimiter in (",", ";", "\t", "|")
-        ]
+def _parse_rows(rows: Iterable[Iterable[Any]], max_rows: int) -> ParsedSheet:
+    if max_rows < 1:
+        raise ValueError("O limite de linhas deve ser maior que zero.")
 
-        def candidate_score(rows: list[list[str]]) -> int:
-            return max((_score(_mapping_for(row)) for row in rows[:30]), default=0)
-
-        rows = max(candidates, key=candidate_score)
-    elif suffix in {"xlsx", "xlsm"}:
-        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        sheet = workbook.active
-        rows = [list(row) for row in sheet.iter_rows(values_only=True)]
-        workbook.close()
-    else:
-        raise ValueError("Formato não suportado. Envie um arquivo CSV ou XLSX.")
-
+    sample = [list(row) for row in islice(rows, 30)]
     best_index = -1
     best_mapping: dict[str, str] = {}
-    for index, row in enumerate(rows[:30]):
+    for index, row in enumerate(sample):
         candidate = _mapping_for(row)
         if _score(candidate) > _score(best_mapping):
             best_index, best_mapping = index, candidate
     if best_index < 0 or _score(best_mapping) < 2:
-        raise ValueError("Não foi possível identificar o cabeçalho Salesforce nas primeiras 30 linhas.")
+        raise ValueError(
+            "Não foi possível identificar o cabeçalho Salesforce nas primeiras 30 linhas."
+        )
 
-    headers = [str(value).strip() if value is not None else "" for value in rows[best_index]]
+    headers = [
+        str(value).strip() if value is not None else "" for value in sample[best_index]
+    ]
     parsed_rows = []
-    for row in rows[best_index + 1 :]:
+    data_rows = chain(sample[best_index + 1 :], rows)
+    for row in data_rows:
+        row = list(row)
         if not any(value is not None and str(value).strip() for value in row):
             continue
+        if len(parsed_rows) >= max_rows:
+            raise ImportLimitExceeded("Planilha acima do limite de linhas configurado.")
         parsed_rows.append(
             {
                 header: (_cell_string(row[index]) if index < len(row) else "")
@@ -123,6 +122,67 @@ def parse_file(filename: str, content: bytes) -> ParsedSheet:
             }
         )
     return ParsedSheet(mapping=best_mapping, rows=parsed_rows)
+
+
+def _csv_delimiter(text: str) -> str:
+    def candidate_score(delimiter: str) -> int:
+        rows = csv.reader(io.StringIO(text), delimiter=delimiter)
+        return max(
+            (_score(_mapping_for(row)) for row in islice(rows, 30)),
+            default=0,
+        )
+
+    return max((",", ";", "\t", "|"), key=candidate_score)
+
+
+def _validate_xlsx_archive(content: bytes, max_uncompressed_bytes: int) -> None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            entries = archive.infolist()
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError("Arquivo XLSX inválido.") from exc
+
+    if len(entries) > MAX_XLSX_ARCHIVE_ENTRIES:
+        raise ImportLimitExceeded("Arquivo XLSX contém arquivos internos em excesso.")
+    if sum(entry.file_size for entry in entries) > max_uncompressed_bytes:
+        raise ImportLimitExceeded("Arquivo XLSX excede o limite de expansão configurado.")
+
+
+def parse_file(
+    filename: str,
+    content: bytes,
+    *,
+    max_rows: int = 10_000,
+    max_uncompressed_bytes: int = MAX_XLSX_UNCOMPRESSED_BYTES,
+) -> ParsedSheet:
+    suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if suffix == "csv":
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = content.decode("cp1252")
+        try:
+            delimiter = _csv_delimiter(text)
+            return _parse_rows(
+                csv.reader(io.StringIO(text), delimiter=delimiter),
+                max_rows,
+            )
+        except csv.Error as exc:
+            raise ValueError("Arquivo CSV inválido.") from exc
+    elif suffix in {"xlsx", "xlsm"}:
+        _validate_xlsx_archive(content, max_uncompressed_bytes)
+        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        try:
+            sheet = workbook.active
+            if sheet.max_column is not None and sheet.max_column > MAX_IMPORT_COLUMNS:
+                raise ImportLimitExceeded("Arquivo XLSX excede o limite de colunas configurado.")
+            if sheet.max_row is not None and sheet.max_row > max_rows + 30:
+                raise ImportLimitExceeded("Arquivo XLSX excede o limite de linhas configurado.")
+            return _parse_rows(sheet.iter_rows(values_only=True), max_rows)
+        finally:
+            workbook.close()
+    else:
+        raise ValueError("Formato não suportado. Envie um arquivo CSV ou XLSX.")
 
 
 def _mapped_value(row: dict[str, Any], mapping: dict[str, str], field: str) -> str | None:

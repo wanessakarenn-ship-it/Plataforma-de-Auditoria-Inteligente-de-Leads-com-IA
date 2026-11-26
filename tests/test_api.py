@@ -1,5 +1,8 @@
 from sqlalchemy import select
 
+from backend.app.api import routes
+from backend.app.config import Settings
+
 
 def test_preview_confirm_persists_leads_and_separates_queues(client):
     csv_data = (
@@ -33,6 +36,19 @@ def test_preview_confirm_persists_leads_and_separates_queues(client):
     assert all(item["outbound_enabled"] is False for item in contact_items)
     assert {item["lead"]["classification"] for item in contact_items} == {"research"}
     assert [item["name"] for item in client.get("/api/reasons").json()["loss"]] == ["Budget"]
+
+
+def test_preview_import_returns_payload_too_large_for_row_limit(client, monkeypatch):
+    settings = Settings(_env_file=None, app_env="test", max_import_rows=1)
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    content = b"Id,Email\n00Q1,one@example.test\n00Q2,two@example.test\n"
+
+    response = client.post(
+        "/api/imports/preview",
+        files={"file": ("bounded.csv", content, "text/csv")},
+    )
+
+    assert response.status_code == 413
 
 
 def test_confirmed_batch_cannot_be_confirmed_twice(client):

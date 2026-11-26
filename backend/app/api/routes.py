@@ -5,14 +5,15 @@ import logging
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from firebase_admin import auth as firebase_auth
 from firebase_admin import exceptions as firebase_exceptions
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.auth import Principal, get_firebase_admin_app, require_roles
 from backend.app.classification import audit_required
 from backend.app.config import get_settings
 from backend.app.db import get_db
-from backend.app.importer import parse_file, validate_rows
+from backend.app.importer import ImportLimitExceeded, parse_file, validate_rows
 from backend.app.models import (
     AuditQueueItem,
     ContactQueueItem,
@@ -56,6 +57,16 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "lead-intelligence-ai-api"}
 
 
+@router.get("/health/ready")
+def readiness(db: Session = Depends(get_db)) -> dict[str, str]:
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        logger.error("API readiness check failed (%s).", type(exc).__name__)
+        raise HTTPException(503, "Service dependencies are unavailable.") from exc
+    return {"status": "ready", "service": "lead-intelligence-ai-api"}
+
+
 @router.post("/imports/preview", response_model=ImportPreviewResponse)
 async def preview_import(
     file: UploadFile = File(...),
@@ -70,10 +81,14 @@ async def preview_import(
     if len(content) > settings.max_import_file_mb * 1024 * 1024:
         raise HTTPException(413, "Arquivo acima do limite configurado.")
     try:
-        parsed = parse_file(filename, content)
-        if len(parsed.rows) > settings.max_import_rows:
-            raise HTTPException(413, "Planilha acima do limite de linhas configurado.")
+        parsed = parse_file(
+            filename,
+            content,
+            max_rows=settings.max_import_rows,
+        )
         checked = validate_rows(parsed.rows, parsed.mapping)
+    except ImportLimitExceeded as exc:
+        raise HTTPException(413, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -543,6 +558,8 @@ def list_admin_users(
     page_token: str | None = None,
     principal: Principal = Depends(require_roles("admin")),
 ):
+    if not get_settings().firebase_admin_user_management_enabled:
+        raise HTTPException(503, "Firebase user management is disabled in this deployment.")
     app = get_firebase_admin_app()
     try:
         page = firebase_auth.list_users(
@@ -551,7 +568,7 @@ def list_admin_users(
             page_token=page_token,
         )
     except firebase_exceptions.FirebaseError as exc:
-        logger.exception("Firebase user listing failed.")
+        logger.error("Firebase user listing failed (%s).", type(exc).__name__)
         raise HTTPException(
             503, "Firebase user management is temporarily unavailable."
         ) from exc
@@ -576,6 +593,8 @@ def update_user_role(
 ):
     if uid == principal.uid:
         raise HTTPException(409, "Administrators cannot change their own access role.")
+    if not get_settings().firebase_admin_user_management_enabled:
+        raise HTTPException(503, "Firebase user management is disabled in this deployment.")
     app = get_firebase_admin_app()
     try:
         user = firebase_auth.get_user(uid, app=app)
@@ -588,7 +607,7 @@ def update_user_role(
     except firebase_exceptions.FirebaseError as exc:
         if isinstance(exc, firebase_auth.UserNotFoundError):
             raise HTTPException(404, "User not found.") from exc
-        logger.exception("Firebase user role update failed.")
+        logger.error("Firebase user role update failed (%s).", type(exc).__name__)
         raise HTTPException(
             503, "Firebase user management is temporarily unavailable."
         ) from exc

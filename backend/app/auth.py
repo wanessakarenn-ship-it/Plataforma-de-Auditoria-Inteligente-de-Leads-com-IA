@@ -57,7 +57,7 @@ def get_firebase_admin_app():
     try:
         return _firebase_app(project_id)
     except (DefaultCredentialsError, ValueError, RuntimeError) as exc:
-        logger.exception("Firebase Admin SDK initialization failed.")
+        logger.error("Firebase Admin SDK initialization failed (%s).", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Firebase authentication is unavailable.",
@@ -173,9 +173,12 @@ def require_roles(*allowed_roles: Role):
             db.add(action)
             try:
                 db.commit()
-            except SQLAlchemyError:
+            except SQLAlchemyError as exc:
                 db.rollback()
-                logger.exception("Could not persist authorized API action.")
+                logger.error(
+                    "Could not persist authorized API action (%s).",
+                    type(exc).__name__,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Administrative action logging is unavailable.",

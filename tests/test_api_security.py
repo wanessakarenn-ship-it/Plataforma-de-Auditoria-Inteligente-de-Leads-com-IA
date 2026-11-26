@@ -5,10 +5,12 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 import backend.app.auth as api_auth
 import backend.app.api.routes as api_routes
 from backend.app.config import Settings
+from backend.app.db import get_db
 from backend.app.main import app
 from backend.app.models import AdminActionLog, Audit, Conversation, Lead, Message, utc_now
 
@@ -20,8 +22,10 @@ def firebase_api_client(db_session_factory, monkeypatch):
         _env_file=None,
         google_cloud_project="synthetic-firebase-project",
         firebase_project_id="synthetic-firebase-project",
+        firebase_admin_user_management_enabled=True,
     )
     monkeypatch.setattr(api_auth, "get_settings", lambda: settings)
+    monkeypatch.setattr(api_routes, "get_settings", lambda: settings)
     verified_tokens = {
         "auditor-a": {"uid": "synthetic-auditor", "role": "auditor", "tenant_id": "tenant-a"},
         "auditor-b": {"uid": "synthetic-auditor-b", "role": "auditor", "tenant_id": "tenant-b"},
@@ -50,6 +54,7 @@ def firebase_api_client(db_session_factory, monkeypatch):
 
 def test_health_is_public_but_business_data_requires_a_bearer_token(firebase_api_client):
     assert firebase_api_client.get("/api/health").status_code == 200
+    assert firebase_api_client.get("/api/health/ready").status_code == 200
     response = firebase_api_client.get("/api/leads")
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
@@ -60,7 +65,7 @@ def test_health_is_public_but_business_data_requires_a_bearer_token(firebase_api
 def test_all_non_health_api_routes_publish_bearer_authentication():
     schema = app.openapi()
     for path, methods in schema["paths"].items():
-        if not path.startswith("/api/") or path == "/api/health":
+        if not path.startswith("/api/") or path.startswith("/api/health"):
             continue
         for operation in methods.values():
             assert operation.get("security") == [{"HTTPBearer": []}], path
@@ -429,6 +434,49 @@ def test_admin_user_listing_and_role_changes_are_tenant_bound_and_logged(
         assert all("/admin/users" in record.route for record in records), [
             record.route for record in records
         ]
+
+
+def test_firebase_user_management_can_be_disabled_without_auth_admin_permissions(
+    firebase_api_client, monkeypatch
+):
+    settings = Settings(
+        _env_file=None,
+        google_cloud_project="synthetic-firebase-project",
+        firebase_project_id="synthetic-firebase-project",
+        firebase_admin_user_management_enabled=False,
+    )
+    monkeypatch.setattr(api_routes, "get_settings", lambda: settings)
+
+    def unexpected_firebase_access():
+        raise AssertionError("Firebase Admin user APIs must not be called when disabled.")
+
+    monkeypatch.setattr(api_routes, "get_firebase_admin_app", unexpected_firebase_access)
+    headers = {"Authorization": "Bearer admin-a"}
+    assert firebase_api_client.get("/api/admin/users", headers=headers).status_code == 503
+    assert (
+        firebase_api_client.put(
+            "/api/admin/users/synthetic-target-user/role",
+            headers=headers,
+            json={"role": "gestor"},
+        ).status_code
+        == 503
+    )
+
+
+def test_readiness_does_not_expose_database_errors(firebase_api_client, caplog):
+    class BrokenSession:
+        def execute(self, *_args, **_kwargs):
+            raise SQLAlchemyError("synthetic-private-database-detail")
+
+    def broken_database():
+        yield BrokenSession()
+
+    app.dependency_overrides[get_db] = broken_database
+    response = firebase_api_client.get("/api/health/ready")
+
+    assert response.status_code == 503
+    assert "synthetic-private-database-detail" not in response.text
+    assert "synthetic-private-database-detail" not in caplog.text
 
 
 def test_import_preview_is_admin_only_and_persists_scoped_action_log(
